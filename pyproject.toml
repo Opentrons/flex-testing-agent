@@ -1,0 +1,95 @@
+[project]
+name = "flex-testing-agent"
+version = "0.1.0"
+description = "Local agentic robot-testing harness for Opentrons Flex (Kansas)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Opentrons" }]
+dependencies = [
+    "httpx>=0.28.1,<0.29",
+    "pydantic>=2.10.0,<3",
+    "pydantic-settings>=2.7.0,<3",
+    "sqlalchemy[asyncio]>=2.0.36,<3",
+    "aiosqlite>=0.20.0,<0.21",
+    "alembic>=1.14.0,<2",
+    "typer>=0.15.1,<0.16",
+    "rich>=13.9.0,<14",
+    "structlog>=24.4.0,<25",
+    "pyyaml>=6.0.2,<7",
+    "filelock>=3.16.0,<4",
+    "packaging>=24.0,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<9",
+    "pytest-asyncio>=0.25.0,<0.26",
+    "respx>=0.22.0,<0.23",
+    "ruff>=0.9.0,<0.10",
+    "mypy>=1.14.0,<2",
+    "types-PyYAML>=6.0.12,<7",
+]
+
+[project.scripts]
+flex-test = "flex_testing_agent.cli.main:main"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flex_testing_agent"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/scenarios",
+    "/alembic",
+    "/README.md",
+    "/alembic.ini",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"src/flex_testing_agent/site/publish.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+mypy_path = "src"
+packages = ["flex_testing_agent"]
+exclude = ["upstream/", "artifacts/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "unit: fast isolated unit tests",
+    "contract: schema/contract tests derived from inspected APIs",
+    "integration: broader integration tests (may use mocks)",
+    "requires_robot: needs a configured physical Flex robot",
+    "mutates_robot: mutates physical robot state (never selected by default)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+addopts = "-m 'not requires_robot and not mutates_robot'"
+
+[tool.coverage.run]
+source = ["flex_testing_agent"]
+branch = true

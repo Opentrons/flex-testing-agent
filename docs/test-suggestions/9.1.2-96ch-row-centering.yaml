@@ -1,0 +1,40 @@
+id: 9.1.2-96ch-row-centering
+title: 96-channel centering on row-layout labware (Flex 9.1.2)
+summary: >
+  Suggested protocol smoke for #21803 (96-channel partial-row centering over
+  nest_8_reservoir_22ml v2). Requires a 96-channel pipette; not runnable on a
+  Flex configured with only P50 single/multi.
+status: suggested
+updated: "2026-07-17"
+release:
+  monorepo_branch: chore_release-9.1.2
+  compared_to_tag: v9.1.1
+  robot_os: 9.1.2-alpha.0
+  prs:
+    - number: 21803
+      title: "fix(api, shared-data): center 96-channel properly for labware with rows"
+      url: https://github.com/Opentrons/opentrons/pull/21803
+hardware_required:
+  - flex_96_channel
+  - nest_8_reservoir_22ml
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test probe --no-picture
+tests:
+  - id: C1
+    name: Partial-row aspirate/dispense centering
+    why: 96ch partial row configs must center on 8-row reservoir wells.
+    steps:
+      - Attach Flex 96-channel pipette.
+      - Load nest_8_reservoir_22ml (definition v2) on deck.
+      - Run a short protocol with partial-row configuration aspirate/dispense.
+      - Visually confirm nozzles center on target wells (no edge offset).
+    result: blocked
+    notes: "KansasFLEX currently has P50 multi + P50 single only"
+  - id: C2
+    name: Compare against pre-9.1.2 if available
+    why: Confirms geometry change vs prior robot OS.
+    steps:
+      - Optional A/B on a second robot or prior build snapshot.
+    result: skipped

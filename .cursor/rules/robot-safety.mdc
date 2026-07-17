@@ -1,0 +1,29 @@
+---
+description: Safety policy for talking to the physical Flex robot
+alwaysApply: true
+---
+
+# Robot safety
+
+This harness talks to a **real** Flex (KansasFLEX). Follow `docs/safety-model.md`.
+
+## Hard constraints
+
+- Mutations default **off** (`ALLOW_MUTATIONS=false`). Require explicit enablement for installs, camera enable, etc.
+- Never enable access control (`PATCH /auth/settings/accessControlEnabled` is one-way)
+- Never implement physical motion capabilities in this milestone
+- Use exclusive robot lock for scenarios that touch the robot
+- All HTTP calls need timeouts via `RobotHttpSession` / settings
+- Redact secrets in evidence; do not commit `.env` or credentials
+- Prefer read-only clients/capabilities unless the user explicitly asks to mutate
+
+## Risk levels
+
+`READ_ONLY` → `REVERSIBLE_MUTATION` → `DISRUPTIVE` → `INSTALLATION` → `DESTRUCTIVE` → `PHYSICAL_MOTION`
+
+Gate mutating work with `ensure_mutation_allowed`. Physical motion is always rejected.
+
+## Robot identity
+
+- Default display name: **KansasFLEX** (not "Kansas")
+- Config: `ROBOT_HOST`, `ROBOT_NAME` in `.env` (gitignored)

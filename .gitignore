@@ -1,0 +1,38 @@
+upstream/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Runtime artifacts
+artifacts/
+*.db
+*.db-journal
+*.sqlite3
+
+# Generated GitHub Pages output (CI builds this)
+/pages/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

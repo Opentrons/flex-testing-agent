@@ -1,0 +1,73 @@
+id: 9.1.2-module-usb-reconnect
+title: Temperature module USB reconnect (Flex 9.1.2)
+summary: >
+  Regression suite for TempDeck / gcode-module USB disconnect tolerance
+  cherry-picked into monorepo branch chore_release-9.1.2. Validates unique
+  inventory, absent/present polling across reconnect cycles, and a live
+  set-temperature smoke command on the restored module instance.
+status: validated
+updated: "2026-07-17"
+release:
+  monorepo_branch: chore_release-9.1.2
+  compared_to_tag: v9.1.1
+  robot_os: 9.1.2-alpha.0
+  prs:
+    - number: 21935
+      title: "chore(mono): Cherry-pick select commits for chore_release-9.1.2"
+      url: https://github.com/Opentrons/opentrons/pull/21935
+    - number: 21834
+      title: "fix(api): retry module build with backoff on transient ParseError/NoResponse"
+      url: https://github.com/Opentrons/opentrons/pull/21834
+    - number: 21880
+      title: "fix(api): prevent duplicate module entries during USB reconnect"
+      url: https://github.com/Opentrons/opentrons/pull/21880
+hardware_required:
+  - temperatureModuleV2
+harness:
+  commands:
+    - uv run flex-test module-reconnect b1
+    - uv run flex-test module-reconnect wait-absent --serial <SERIAL>
+    - uv run flex-test module-reconnect wait-present --serial <SERIAL>
+    - uv run flex-test module-reconnect smoke --serial <SERIAL> --celsius 25
+tests:
+  - id: B1
+    name: Unique attach
+    why: Baseline inventory must show exactly one temperature module with no duplicate serials.
+    steps:
+      - Ensure TempDeck USB is connected.
+      - Run `uv run flex-test module-reconnect b1`.
+      - Confirm PASS and record serial.
+    result: pass
+    notes: "KansasFLEX TDV21P20211130D06 idle ~22C"
+  - id: B2
+    name: Unplug then replug
+    why: Reconnect path must drop the module then restore a single live instance (#21834/#21880).
+    steps:
+      - Unplug TempDeck USB.
+      - Run `wait-absent --serial <SERIAL>`.
+      - Replug USB.
+      - Run `wait-present --serial <SERIAL>` and `b1`.
+    result: pass
+  - id: B3
+    name: Rapid reconnect cycles
+    why: Duplicate serial accumulation was latent until retry landed; stress reconnect.
+    steps:
+      - Repeat unplug/absent/replug/present for three full cycles.
+      - After each present, confirm duplicates=none.
+    result: pass
+    notes: "Three cycles on KansasFLEX; no duplicates"
+  - id: B4
+    name: Transient re-enumeration
+    why: TempDeck-specific poller/driver reconnect on brief USB re-enumeration.
+    steps:
+      - Covered by rapid USB unplug/replug cycles above.
+      - Optionally wiggle/reseat cable without full removal.
+    result: pass
+  - id: B5
+    name: Live command after reconnect
+    why: Ensure the restored instance is usable (not a stale closed port).
+    steps:
+      - With module present, run `module-reconnect smoke --serial <SERIAL> --celsius 25`.
+      - Expect setTargetTemperature and deactivate both succeeded.
+    result: pass
+    notes: "set 25C succeeded; deactivate succeeded"

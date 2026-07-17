@@ -1,0 +1,11 @@
+name: lockdown-smoke
+description: >
+  PLACEHOLDER / NOT IMPLEMENTED.
+  Reversible lockdown transitions are unsupported: access control can be
+  enabled via API but cannot be disabled without Opentrons assistance.
+  Milestone 1 only detects accessControlEnabled; it never enables it.
+requires:
+  - access_control
+risk_level: DISRUPTIVE
+max_duration_seconds: 600
+restore_baseline: true

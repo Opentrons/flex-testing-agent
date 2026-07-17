@@ -1,0 +1,10 @@
+name: inspect-robot
+description: >
+  Read-only inspection of the configured Flex robot (Kansas).
+  Captures health, service versions, and access-control detection.
+  Does not enable access control or mutate robot state.
+requires:
+  - health
+risk_level: READ_ONLY
+max_duration_seconds: 120
+restore_baseline: false

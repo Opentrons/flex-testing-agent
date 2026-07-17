@@ -1,0 +1,39 @@
+---
+description: Always typecheck and lint all code after changes
+alwaysApply: true
+---
+
+# Quality gates (mandatory)
+
+Every change to this repository must leave the codebase **fully typechecked and linted**. Do not consider a task done until checks pass.
+
+## Required before finishing code work
+
+Run from the repo root (after `uv sync --all-extras` if deps changed):
+
+```bash
+make lint
+```
+
+That runs:
+
+1. `uv run ruff check src tests`
+2. `uv run ruff format --check src tests`
+3. `uv run mypy` (strict, package `flex_testing_agent`)
+
+Also run relevant tests:
+
+```bash
+make test
+```
+
+## Rules
+
+- Fix all ruff and mypy failures you introduce (or that your change surfaces in touched code)
+- Prefer `make format` to auto-fix style, then re-run `make lint`
+- Do not weaken `pyproject.toml` mypy/ruff settings to silence errors
+- Do not skip checks with `# type: ignore` / `# noqa` unless there is a short, justified comment
+- New modules under `src/flex_testing_agent/` must typecheck under strict mypy
+- Keep tests lint-clean (`tests/` is included in ruff)
+
+If lint or typecheck fails, fix it in the same turn before reporting completion.

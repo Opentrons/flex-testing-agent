@@ -1,0 +1,50 @@
+---
+description: Core architecture and extension model for the Flex testing harness
+alwaysApply: true
+---
+
+# flex-testing-agent
+
+Local Python harness for a physical Opentrons Flex (**KansasFLEX**). The harness is the product; Cursor/Claude/MCP are adapters.
+
+## Layering (extend in this order)
+
+1. **Atomic clients** (`src/flex_testing_agent/clients/`) – thin async httpx wrappers for robot HTTP APIs
+2. **Capabilities** (`src/flex_testing_agent/capabilities/`) – compose clients with risk, gates, evidence
+3. **Scenarios / orchestration** – locks, run context, mutation gates, persistence
+4. **CLI** (`flex-test`) or future adapters – thin entrypoints only
+
+Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from agents.
+
+## Existing surface to reuse
+
+| Area | Location |
+|------|----------|
+| Session + headers | `clients/session.py` |
+| Health / update / auth detect | `clients/health.py`, `update_health.py`, `auth_settings.py` |
+| Read-only catalog + probe | `clients/readonly.py`, `capabilities/probe.py` |
+| Camera | `clients/camera.py` |
+| Install / update | `clients/update.py`, `capabilities/install.py` |
+| Releases | `releases/` |
+| Flex facade | `robots/flex.py` |
+| Gates | `orchestration/gates.py` |
+| Docs | `docs/architecture.md`, `docs/safety-model.md` |
+
+## Extension rules
+
+- Prefer new **client methods** over one-off httpx in capabilities/CLI
+- New robot operations need a `CapabilityDescriptor` + risk level + gate checks
+- Catalog new GET paths in `READONLY_ENDPOINTS` when adding read-only API coverage
+- Call `opentrons/opentrons` the **monorepo**; research clone at `upstream/opentrons`
+- Point-release docs: `docs/monorepo-releases.md` (`chore_release-X.Y.Z` cherry-picks / mergebacks)
+- Publish robot test plans as YAML in `docs/test-suggestions/`; `make pages` / Pages workflow on `main`
+- Package/CLI name: `flex_testing_agent` / `flex-test`; Python 3.12+; use `uv`
+
+## Commands
+
+```bash
+uv sync --all-extras
+make lint          # ruff + mypy (required after code changes)
+make test
+uv run flex-test inspect|probe|releases|put <version>
+```
