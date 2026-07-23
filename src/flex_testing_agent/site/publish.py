@@ -74,22 +74,26 @@ def linkify(
 def _css() -> str:
     return """
 :root {
-  --bg: #f4f1eb;
-  --ink: #1a1917;
-  --muted: #5a554c;
-  --panel: #fffcf7;
-  --line: #d8d0c2;
-  --accent: #006c68;
-  --accent-soft: #e4f2f1;
-  --validated: #1f6b3a;
-  --suggested: #8a5a00;
-  --draft: #5a554c;
-  --pass: #1f6b3a;
-  --fail: #9b1c1c;
-  --blocked: #8a5a00;
-  --skipped: #5a554c;
-  --font: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --bg: #eef3f2;
+  --ink: #10231f;
+  --muted: #4d635d;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-solid: #f7fbfa;
+  --line: #c5d5d0;
+  --accent: #0b7a6e;
+  --accent-deep: #065248;
+  --accent-soft: #d7efe9;
+  --band: #0f3b35;
+  --validated: #0d6b3c;
+  --suggested: #9a5b00;
+  --draft: #4d635d;
+  --pass: #0d6b3c;
+  --fail: #a11919;
+  --blocked: #9a5b00;
+  --skipped: #4d635d;
+  --display: "Space Grotesk", "Avenir Next", sans-serif;
+  --font: "Source Sans 3", "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
 }
 * { box-sizing: border-box; }
 body {
@@ -97,132 +101,191 @@ body {
   font-family: var(--font);
   color: var(--ink);
   background:
-    radial-gradient(1100px 520px at 8% -8%, #e4efe8 0%, transparent 55%),
-    radial-gradient(900px 480px at 100% 0%, #efe6d6 0%, transparent 48%),
+    linear-gradient(180deg, #0f3b35 0 210px, transparent 210px),
+    radial-gradient(900px 420px at 90% 0%, #1a5c52 0%, transparent 55%),
+    radial-gradient(700px 380px at 0% 240px, #d7efe9 0%, transparent 60%),
     var(--bg);
   line-height: 1.55;
 }
-a { color: var(--accent); }
+a { color: var(--accent-deep); }
 a.ref {
   font-family: var(--mono);
-  font-size: 0.92em;
+  font-size: 0.9em;
   text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
 }
-a.ref:hover { border-bottom-color: var(--accent); }
-header, main, footer {
-  width: min(980px, calc(100% - 2rem));
+a.ref:hover { color: var(--accent-deep); border-bottom-color: var(--accent-deep); }
+.shell {
+  width: min(1040px, calc(100% - 2rem));
   margin-inline: auto;
 }
-header { padding: 2.4rem 0 1rem; }
+header.shell { padding: 2.1rem 0 1.4rem; color: #eef7f4; }
+header .brand {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9fd4c8;
+  margin: 0 0 0.55rem;
+}
 header h1 {
-  margin: 0 0 0.4rem;
-  font-size: clamp(1.85rem, 3vw, 2.45rem);
-  letter-spacing: -0.02em;
+  margin: 0 0 0.55rem;
+  font-family: var(--display);
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+  color: #f4fffb;
 }
-header p { margin: 0; color: var(--muted); max-width: 40rem; }
+header p { margin: 0; color: #c5e4db; max-width: 36rem; font-size: 1.05rem; }
 nav {
-  display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
-  margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--line);
+  display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center;
+  margin-top: 1.35rem;
 }
-nav a { text-decoration: none; font-weight: 600; }
-main { padding-bottom: 3rem; }
+nav a {
+  text-decoration: none;
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: #effaf6;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 999px;
+  padding: 0.38rem 0.85rem;
+}
+nav a:hover { background: rgba(255,255,255,0.16); }
+main.shell { padding: 1.4rem 0 3.2rem; }
 .card {
   background: var(--panel);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 1.25rem 1.35rem;
+  border-radius: 18px;
+  padding: 1.35rem 1.45rem;
   margin: 1rem 0;
-  box-shadow: 0 1px 0 rgba(28, 27, 25, 0.03);
 }
-.card h2, .card h3 { margin: 0 0 0.55rem; letter-spacing: -0.01em; }
-.card h2 { font-size: 1.35rem; }
-.meta { color: var(--muted); font-size: 0.92rem; }
+.card h2, .card h3 {
+  margin: 0 0 0.55rem;
+  font-family: var(--display);
+  letter-spacing: -0.02em;
+}
+.card h2 { font-size: 1.45rem; }
+.card h2 a { color: inherit; text-decoration: none; }
+.card h2 a:hover { color: var(--accent); }
+.meta { color: var(--muted); font-size: 0.95rem; }
+.lead { font-size: 1.05rem; max-width: 52rem; }
 .chip-row {
-  display: flex; flex-wrap: wrap; gap: 0.45rem;
-  margin: 0.85rem 0 0.35rem;
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  margin: 1rem 0 0.4rem;
 }
 .chip {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  padding: 0.28rem 0.65rem;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.4rem 0.75rem;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--panel-solid);
   color: var(--ink);
   text-decoration: none;
   font-size: 0.86rem;
-  font-weight: 600;
+  font-weight: 650;
 }
 .chip:hover { border-color: var(--accent); background: var(--accent-soft); }
 .chip .kind {
+  font-family: var(--display);
   font-size: 0.68rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 700;
 }
-.chip.jira { border-color: #c7d4ef; }
-.chip.pr { border-color: #c9ddd4; }
+.chip.jira { border-color: #b7c8ef; background: #f3f6ff; }
+.chip.pr { border-color: #b7dccf; background: #f1faf6; }
 .badge {
   display: inline-block;
+  font-family: var(--display);
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  padding: 0.15rem 0.5rem;
+  padding: 0.18rem 0.55rem;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: #fff;
 }
-.badge.validated { color: var(--validated); border-color: #b9d8c3; }
-.badge.suggested { color: var(--suggested); border-color: #e6d3a4; }
+.badge.validated { color: var(--validated); border-color: #b5dfc4; background: #eefaf2; }
+.badge.suggested { color: var(--suggested); border-color: #efd29a; background: #fff8ea; }
 .badge.draft { color: var(--draft); }
-.badge.pass { color: var(--pass); }
-.badge.fail { color: var(--fail); }
-.badge.blocked { color: var(--blocked); }
+.badge.pass { color: var(--pass); background: #eefaf2; border-color: #b5dfc4; }
+.badge.fail { color: var(--fail); background: #fff0f0; border-color: #f0b4b4; }
+.badge.blocked { color: var(--blocked); background: #fff8ea; border-color: #efd29a; }
 .badge.skipped { color: var(--skipped); }
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin: 1rem 0 0.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.7rem;
+  margin: 1.1rem 0 0.35rem;
 }
 .fact {
-  background: #fff;
+  background: var(--panel-solid);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
 }
 .fact .label {
   display: block;
-  font-size: 0.7rem;
+  font-family: var(--display);
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.25rem;
 }
 .fact code, .fact a { font-family: var(--mono); font-size: 0.86rem; }
-ul.steps { margin: 0.45rem 0 0.2rem; padding-left: 1.2rem; }
-ul.steps li { margin: 0.25rem 0; }
-pre, code { font-family: var(--mono); font-size: 0.88rem; }
+ul.steps { margin: 0.45rem 0 0.2rem; padding-left: 1.15rem; }
+ul.steps li { margin: 0.28rem 0; }
+pre, code { font-family: var(--mono); font-size: 0.86rem; }
 pre {
-  background: #1c1b19;
-  color: #f4efe6;
-  padding: 0.9rem 1rem;
-  border-radius: 10px;
+  background: #10231f;
+  color: #e7f7f2;
+  padding: 0.95rem 1.05rem;
+  border-radius: 12px;
   overflow-x: auto;
+  border: 1px solid #1d4038;
 }
-table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; }
+table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; }
 th, td {
-  text-align: left; padding: 0.7rem 0.45rem;
+  text-align: left; padding: 0.85rem 0.5rem;
   border-bottom: 1px solid var(--line); vertical-align: top;
 }
-th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-td.test-id { width: 10.5rem; }
-footer {
-  padding: 1.5rem 0 2.5rem; color: var(--muted); font-size: 0.9rem;
+th {
+  font-family: var(--display);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+td.test-id { width: 11rem; }
+td.test-id strong {
+  font-family: var(--display);
+  font-size: 1.05rem;
+}
+.section-title {
+  font-family: var(--display);
+  font-size: 1.55rem;
+  letter-spacing: -0.02em;
+  margin: 0.4rem 0 0.35rem;
+}
+footer.shell {
+  padding: 1.4rem 0 2.6rem;
+  color: var(--muted);
+  font-size: 0.92rem;
   border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  td.test-id { width: auto; display: block; padding-bottom: 0.2rem; }
+  tr, td { display: block; }
+  th { display: none; }
 }
 """.strip()
 
@@ -237,24 +300,24 @@ def _layout(title: str, body: str, *, relative_prefix: str = "") -> str:
   <title>{_esc(title)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
   <style>{_css()}</style>
 </head>
 <body>
-  <header>
+  <header class="shell">
+    <p class="brand">Opentrons · Flex harness</p>
     <h1>flex-testing-agent</h1>
-    <p>Published Flex robot test suggestions from monorepo release deltas,
-    with links to GitHub PRs and Jira.</p>
+    <p>Release-driven robot test suggestions with live Jira and monorepo PR links.</p>
     <nav>
       <a href="{home}">Test suggestions</a>
       <a href="https://github.com/Opentrons/flex-testing-agent">GitHub</a>
       <a href="https://github.com/Opentrons/flex-testing-agent#readme">README</a>
     </nav>
   </header>
-  <main>
+  <main class="shell">
 {body}
   </main>
-  <footer>
+  <footer class="shell">
     Apache-2.0 · Opentrons · Built from <code>docs/test-suggestions/</code>
     on push to <code>main</code>.
   </footer>
@@ -318,8 +381,8 @@ def render_index(suggestions: list[TestSuggestion]) -> str:
 """.strip()
         )
     body = f"""
-<h2>Test suggestions</h2>
-<p class="meta">Plans derived from the <code>opentrons/opentrons</code> monorepo
+<h2 class="section-title">Test suggestions</h2>
+<p class="lead meta">Plans derived from the <code>opentrons/opentrons</code> monorepo
 release branches. Add YAML under <code>docs/test-suggestions/</code>; CI publishes
 this site with live Jira and PR links.</p>
 {"".join(cards) if cards else "<p>No published suggestions yet.</p>"}

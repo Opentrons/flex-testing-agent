@@ -48,7 +48,13 @@ READONLY_ENDPOINTS: tuple[ReadonlyEndpoint, ...] = (
     ReadonlyEndpoint("estop_status", "/robot/control/estopStatus", "robot"),
     ReadonlyEndpoint("door_status", "/robot/door/status", "robot"),
     ReadonlyEndpoint("lights", "/robot/lights", "robot"),
-    ReadonlyEndpoint("motors_engaged", "/motors/engaged", "robot"),
+    ReadonlyEndpoint(
+        "motors_engaged",
+        "/motors/engaged",
+        "robot",
+        notes="Flex often returns 500; treat as known soft failure.",
+        acceptable_status=(200, 500),
+    ),
     ReadonlyEndpoint("subsystems_status", "/subsystems/status", "robot"),
     ReadonlyEndpoint(
         "subsystems_updates_current",

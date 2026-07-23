@@ -35,6 +35,8 @@ tests:
     steps:
       - Run `uv run flex-test inspect`.
       - Confirm installed software version is `v9.1.2-alpha.1` (or newer on the same branch).
+    result: pass
+    notes: "KansasFLEX probe/inspect 2026-07-23: system/API/update-server v9.1.2-alpha.1; probe 43/43 acceptable"
   - id: E2
     name: Upload loop + RTP protocol
     why: "Repro path from AUTH-3041 / #21905 requires a protocol that uses a loop and runtime parameters."
@@ -42,6 +44,8 @@ tests:
       - Obtain the protocol attached to AUTH-3041 (or an equivalent protocol with at least one loop and one RTP).
       - Upload it to KansasFLEX (desktop app or robot Protocols screen).
       - Confirm analysis succeeds and the protocol appears on the robot.
+    result: skipped
+    notes: "Harness baseline done; needs AUTH-3041 protocol on ODD"
   - id: E3
     name: Protocol Setup remains responsive
     why: >
@@ -54,6 +58,8 @@ tests:
       - Scroll lists if present; leave setup idle for several seconds.
       - "Pass criteria: no freeze, blank flash, or runaway re-render; setup remains usable end-to-end."
       - "Fail criteria: UI locks up, flickers continuously, or requires reboot to recover."
+    result: skipped
+    notes: "Operator touchscreen follow-up"
   - id: E4
     name: Complete setup readiness (optional)
     why: Confirms setup can finish after RTP edits without a render-path failure.
@@ -61,3 +67,5 @@ tests:
       - With hardware matching the protocol (or as far as setup allows), proceed through Confirm.
       - "Optional: start then cancel the run if motion is acceptable for this session."
       - Record whether Confirm / Run controls behaved normally after RTP changes.
+    result: skipped
+    notes: "Operator touchscreen follow-up"

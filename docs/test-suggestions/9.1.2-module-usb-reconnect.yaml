@@ -6,11 +6,11 @@ summary: >
   inventory, absent/present polling across reconnect cycles, and a live
   set-temperature smoke command on the restored module instance.
 status: validated
-updated: "2026-07-17"
+updated: "2026-07-23"
 release:
   monorepo_branch: chore_release-9.1.2
   compared_to_tag: v9.1.1
-  robot_os: 9.1.2-alpha.0
+  robot_os: 9.1.2-alpha.1
   tickets: []
   prs:
     - number: 21935
@@ -39,7 +39,7 @@ tests:
       - Run `uv run flex-test module-reconnect b1`.
       - Confirm PASS and record serial.
     result: pass
-    notes: "KansasFLEX TDV21P20211130D06 idle ~22C"
+    notes: "Validated on KansasFLEX TDV21P20211130D06 (alpha.0); robot later probed healthy on alpha.1"
   - id: B2
     name: Unplug then replug
     why: "Reconnect path must drop the module then restore a single live instance (#21834/#21880)."
