@@ -11,6 +11,9 @@ release:
   monorepo_branch: chore_release-9.1.2
   compared_to_tag: v9.1.2-alpha.0
   robot_os: 9.1.2-alpha.1
+  tickets:
+    - key: AUTH-3041
+      title: ODD re-render with loop and RTP during Protocol Setup
   prs:
     - number: 21946
       title: "fix(app) cherry picking for ODD rendering issue when using a loop with RTP"
@@ -34,7 +37,7 @@ tests:
       - Confirm installed software version is `v9.1.2-alpha.1` (or newer on the same branch).
   - id: E2
     name: Upload loop + RTP protocol
-    why: Repro path from AUTH-3041 / #21905 requires a protocol that uses a loop and runtime parameters.
+    why: "Repro path from AUTH-3041 / #21905 requires a protocol that uses a loop and runtime parameters."
     steps:
       - Obtain the protocol attached to AUTH-3041 (or an equivalent protocol with at least one loop and one RTP).
       - Upload it to KansasFLEX (desktop app or robot Protocols screen).
@@ -42,7 +45,7 @@ tests:
   - id: E3
     name: Protocol Setup remains responsive
     why: >
-      #21946/#21905 memoize protocolModulesInfo and labware setup groups so
+      #21946 and #21905 memoize protocolModulesInfo and labware setup groups so
       Protocol Setup Labware / Modules / deck screens do not thrash on RTP-driven updates.
     steps:
       - On the Flex touchscreen, open the uploaded protocol and enter Protocol Setup.

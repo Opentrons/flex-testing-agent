@@ -9,13 +9,31 @@ from pydantic import BaseModel, Field
 SuggestionStatus = Literal["draft", "suggested", "validated"]
 TestResult = Literal["pass", "fail", "blocked", "skipped"]
 
+DEFAULT_JIRA_BROWSE = "https://opentrons.atlassian.net/browse"
+DEFAULT_MONOREPO_PR = "https://github.com/Opentrons/opentrons/pull"
+DEFAULT_MONOREPO_BRANCH = "https://github.com/Opentrons/opentrons/tree"
+
 
 class PullRequestRef(BaseModel):
     """Monorepo PR referenced by a suggestion."""
 
     number: int
     title: str
-    url: str
+    url: str | None = None
+
+    def resolved_url(self) -> str:
+        return self.url or f"{DEFAULT_MONOREPO_PR}/{self.number}"
+
+
+class TicketRef(BaseModel):
+    """Jira (or other tracker) ticket referenced by a suggestion."""
+
+    key: str
+    title: str | None = None
+    url: str | None = None
+
+    def resolved_url(self) -> str:
+        return self.url or f"{DEFAULT_JIRA_BROWSE}/{self.key}"
 
 
 class ReleaseContext(BaseModel):
@@ -25,6 +43,7 @@ class ReleaseContext(BaseModel):
     compared_to_tag: str | None = None
     robot_os: str | None = None
     prs: list[PullRequestRef] = Field(default_factory=list)
+    tickets: list[TicketRef] = Field(default_factory=list)
 
 
 class HarnessHints(BaseModel):

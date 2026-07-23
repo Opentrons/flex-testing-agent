@@ -10,7 +10,8 @@
 | `release.monorepo_branch` | string | yes | e.g. `chore_release-9.1.2` |
 | `release.compared_to_tag` | string | no | Prior tag, e.g. `v9.1.1` |
 | `release.robot_os` | string | no | Bare robot OS key tested |
-| `release.prs` | list | no | `{number, title, url}` |
+| `release.prs` | list | no | `{number, title, url?}` (url defaults to monorepo PR) |
+| `release.tickets` | list | no | `{key, title?, url?}` (url defaults to Opentrons Jira browse) |
 | `hardware_required` | list[string] | no | Module/pipette needs |
 | `harness.commands` | list[string] | no | `flex-test` commands |
 | `tests` | list | yes | Suite entries |

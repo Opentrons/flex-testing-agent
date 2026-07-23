@@ -11,6 +11,7 @@ release:
   monorepo_branch: chore_release-9.1.2
   compared_to_tag: v9.1.1
   robot_os: 9.1.2-alpha.0
+  tickets: []
   prs:
     - number: 21935
       title: "chore(mono): Cherry-pick select commits for chore_release-9.1.2"
@@ -41,7 +42,7 @@ tests:
     notes: "KansasFLEX TDV21P20211130D06 idle ~22C"
   - id: B2
     name: Unplug then replug
-    why: Reconnect path must drop the module then restore a single live instance (#21834/#21880).
+    why: "Reconnect path must drop the module then restore a single live instance (#21834/#21880)."
     steps:
       - Unplug TempDeck USB.
       - Run `wait-absent --serial <SERIAL>`.

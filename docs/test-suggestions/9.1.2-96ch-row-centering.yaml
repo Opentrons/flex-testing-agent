@@ -10,6 +10,9 @@ release:
   monorepo_branch: chore_release-9.1.2
   compared_to_tag: v9.1.1
   robot_os: 9.1.2-alpha.0
+  tickets:
+    - key: EXEC-2737
+      title: 96-channel centering over 8-well / row reservoirs
   prs:
     - number: 21803
       title: "fix(api, shared-data): center 96-channel properly for labware with rows"
@@ -24,7 +27,7 @@ harness:
 tests:
   - id: C1
     name: Partial-row aspirate/dispense centering
-    why: 96ch partial row configs must center on 8-row reservoir wells.
+    why: "96ch partial row configs must center on 8-row reservoir wells (EXEC-2737 / #21803)."
     steps:
       - Attach Flex 96-channel pipette.
       - Load nest_8_reservoir_22ml (definition v2) on deck.

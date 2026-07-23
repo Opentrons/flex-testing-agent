@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from flex_testing_agent.site.publish import (
+    linkify,
     load_suggestions,
     publish_test_suggestion_pages,
 )
@@ -26,6 +27,19 @@ def test_load_repo_suggestions() -> None:
     assert odd.status == "suggested"
     assert odd.release.robot_os == "9.1.2-alpha.1"
     assert {t.id for t in odd.tests} >= {"E1", "E2", "E3"}
+    assert odd.release.tickets[0].key == "AUTH-3041"
+
+
+@pytest.mark.unit
+def test_linkify_jira_and_prs() -> None:
+    html = linkify(
+        "See AUTH-3041 and #21946 for context.",
+        pr_urls={21946: "https://github.com/Opentrons/opentrons/pull/21946"},
+    )
+    assert 'href="https://opentrons.atlassian.net/browse/AUTH-3041"' in html
+    assert ">AUTH-3041<" in html
+    assert 'href="https://github.com/Opentrons/opentrons/pull/21946"' in html
+    assert ">#21946<" in html
 
 
 @pytest.mark.unit
@@ -40,8 +54,15 @@ def test_publish_writes_index_and_pages(tmp_path: Path) -> None:
     index = (tmp_path / "index.html").read_text(encoding="utf-8")
     assert "Temperature module USB reconnect" in index
     assert "9.1.2-module-usb-reconnect.html" in index
-    detail = (tmp_path / "suggestions" / "9.1.2-module-usb-reconnect.html").read_text(
+    assert "opentrons.atlassian.net/browse/AUTH-3041" in index
+    detail = (tmp_path / "suggestions" / "9.1.2-odd-loop-rtp-setup.html").read_text(
         encoding="utf-8"
     )
-    assert "wait-absent" in detail
-    assert "validated" in detail
+    assert "wait-absent" not in detail
+    assert "chip jira" in detail
+    assert "chip pr" in detail
+    assert "https://opentrons.atlassian.net/browse/AUTH-3041" in detail
+    assert "https://github.com/Opentrons/opentrons/pull/21946" in detail
+    assert "https://github.com/Opentrons/opentrons/pull/21905" in detail
+    assert "Repro path from" in detail
+    assert "#21905" in detail
