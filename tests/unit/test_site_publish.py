@@ -18,9 +18,14 @@ def test_load_repo_suggestions() -> None:
     ids = {item.id for item in suggestions}
     assert "9.1.2-module-usb-reconnect" in ids
     assert "9.1.2-96ch-row-centering" in ids
+    assert "9.1.2-odd-loop-rtp-setup" in ids
     validated = next(s for s in suggestions if s.id == "9.1.2-module-usb-reconnect")
     assert validated.status == "validated"
     assert validated.tests[0].id == "B1"
+    odd = next(s for s in suggestions if s.id == "9.1.2-odd-loop-rtp-setup")
+    assert odd.status == "suggested"
+    assert odd.release.robot_os == "9.1.2-alpha.1"
+    assert {t.id for t in odd.tests} >= {"E1", "E2", "E3"}
 
 
 @pytest.mark.unit

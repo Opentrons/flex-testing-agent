@@ -1,0 +1,60 @@
+id: 9.1.2-odd-loop-rtp-setup
+title: ODD Protocol Setup with loop and runtime parameters (Flex 9.1.2-alpha.1)
+summary: >
+  Touchscreen Protocol Setup smoke for AUTH-3041. Alpha.1 cherry-picked
+  useMemo around protocol-modules and labware grouping so setup screens do
+  not re-render excessively when a protocol uses loops and runtime parameters
+  (RTP). This is the primary new test surface in v9.1.2-alpha.1 versus alpha.0.
+status: suggested
+updated: "2026-07-23"
+release:
+  monorepo_branch: chore_release-9.1.2
+  compared_to_tag: v9.1.2-alpha.0
+  robot_os: 9.1.2-alpha.1
+  prs:
+    - number: 21946
+      title: "fix(app) cherry picking for ODD rendering issue when using a loop with RTP"
+      url: https://github.com/Opentrons/opentrons/pull/21946
+    - number: 21905
+      title: "fix(app): add useMemo to avoid unnecessary re-rendering for RTP"
+      url: https://github.com/Opentrons/opentrons/pull/21905
+hardware_required:
+  - flex_touchscreen_odd
+  - protocol_with_loop_and_rtp
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test probe --no-picture
+tests:
+  - id: E1
+    name: Confirm robot is on alpha.1
+    why: ODD fix shipped in v9.1.2-alpha.1; confirm KansasFLEX is on that build before UI smoke.
+    steps:
+      - Run `uv run flex-test inspect`.
+      - Confirm installed software version is `v9.1.2-alpha.1` (or newer on the same branch).
+  - id: E2
+    name: Upload loop + RTP protocol
+    why: Repro path from AUTH-3041 / #21905 requires a protocol that uses a loop and runtime parameters.
+    steps:
+      - Obtain the protocol attached to AUTH-3041 (or an equivalent protocol with at least one loop and one RTP).
+      - Upload it to KansasFLEX (desktop app or robot Protocols screen).
+      - Confirm analysis succeeds and the protocol appears on the robot.
+  - id: E3
+    name: Protocol Setup remains responsive
+    why: >
+      #21946/#21905 memoize protocolModulesInfo and labware setup groups so
+      Protocol Setup Labware / Modules / deck screens do not thrash on RTP-driven updates.
+    steps:
+      - On the Flex touchscreen, open the uploaded protocol and enter Protocol Setup.
+      - Open Parameters (RTP) and change at least one runtime parameter value.
+      - Navigate Labware setup and Modules and deck setup (and back).
+      - Scroll lists if present; leave setup idle for several seconds.
+      - "Pass criteria: no freeze, blank flash, or runaway re-render; setup remains usable end-to-end."
+      - "Fail criteria: UI locks up, flickers continuously, or requires reboot to recover."
+  - id: E4
+    name: Complete setup readiness (optional)
+    why: Confirms setup can finish after RTP edits without a render-path failure.
+    steps:
+      - With hardware matching the protocol (or as far as setup allows), proceed through Confirm.
+      - "Optional: start then cancel the run if motion is acceptable for this session."
+      - Record whether Confirm / Run controls behaved normally after RTP changes.
