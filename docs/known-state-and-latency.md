@@ -118,6 +118,61 @@ helpers) from suite code the same way CLI does. Prefer capabilities over curl.
 Existing Pyro bugs may break seeds on internal builds; still record timings and
 failures (do not hide product defects).
 
+## Aggregation caveats (KansasFLEX 2026-08-04)
+
+Local archives (gitignored):
+
+| Archive | Path |
+|---------|------|
+| Non-Pyro baseline | `artifacts/timing/baseline-9.1.2-alpha.5/` |
+| Pyro compare (partial) | `artifacts/timing/pyro-4.0.0-alpha.10/` |
+| Extra Pyro retry | `artifacts/timing/seed-runs-ea0a7a48-*.json` (not copied into archive yet) |
+
+**Do not share raw numbers without these caveats.**
+
+### Missing / incomplete Pyro install timings
+
+- `flex-test put 4.0.0-alpha.10 --channel internal` flashed successfully (update-server
+  showed `ot3@4.0.0-alpha.10`), but the harness hung waiting on robot-server
+  `/health` 500 (`DatabaseFailedToInitialize` / EBUSY; [RQA-5808](https://opentrons.atlassian.net/browse/RQA-5808)).
+- The hung `put` was killed after SSH recovery, so **no**
+  `install-4.0.0-alpha.10-*.json` was written.
+- Therefore there is **no comparable** Pyro `install.download`,
+  `install.upload_and_flash`, or `boot.health` span for this session.
+- Baseline install on `v9.1.2-alpha.5` *was* recorded (~13s download, ~391s
+  upload/flash, ~125s `boot.health`).
+
+### Seed-run reliability vs latency
+
+- First Pyro `seed-runs` pass: only `simple_home_move` succeeded; the next five
+  seeds failed with HTTP 500 on `POST /protocols` after uncurrent.
+- Journal showed stale Pyro `CommunicationError` / connection reset to a dead
+  `ot-protocol` port. Treat as impact of [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)
+  (related: [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790)), not as
+  “slow upload.”
+- Spans left open at failure (often ~30–180s on `*.upload` / `*.create`) are
+  **timeout / error dwell**, not successful operation latency. Exclude them from
+  aggregates, or report them separately as failure durations.
+- Retry pass recovered some seeds (`complex`, `cancel`, `idle`);
+  `heater_shaker_brief` and `camera_and_comments` still failed on `POST /runs` 500.
+  Prefer retry spans that `status=ok` / completed when comparing to baseline.
+
+### Fair compare guidance
+
+When aggregating later:
+
+1. Compare only **completed** spans with matching metric ids and seed ids.
+2. Call out that Pyro play metrics may include post-uncurrent recovery noise;
+   prefer the first successful seed after a clean robot-server / protocol-process
+   state when possible.
+3. Do not invent Pyro `boot.health` from wall-clock memory; re-run `put` after
+   the install wait fix lands if a publishable boot compare is needed.
+4. Note HS protocol target is API min **37 °C** (not ambient); first baseline HS
+   attempt at 23 °C failed validation and was re-run.
+5. Camera seed uses in-protocol `capture_image` (apiLevel 2.27+); harness HTTP
+   `/camera/picture` mid-run still hits [RQA-5807](https://opentrons.atlassian.net/browse/RQA-5807)
+   and must not be treated as a camera-latency success.
+
 ## Safety
 
 - Mutations gated (`ALLOW_MUTATIONS`)
