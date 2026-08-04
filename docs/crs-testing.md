@@ -119,15 +119,39 @@ suite preflight.
 | Tier | What | Gate / CLI | Default run state |
 |------|------|------------|-------------------|
 | **A** | All parameter-free GETs (+ known soft statuses) | `flex-test probe` | `no-current` |
-| **B** | Parameterized GETs using protocol/run/data-file fixtures | `flex-test crs-off-b` (`--create-fixtures` needs `ALLOW_MUTATIONS`) | `current-idle` |
-| **C** | Reversible mutations (lights toggle+restore, clientData put/get/delete) | `ALLOW_MUTATIONS`; `flex-test crs-off-c` | `no-current` |
+| **B** | Parameterized GETs using protocol/run/data-file/subsystem/log/clientData fixtures | `flex-test crs-off-b` (`--create-fixtures` needs `ALLOW_MUTATIONS`) | `current-idle` |
+| **C** | Reversible mutations (lights, clientData, camera, errorRecovery, labwareOffsets, throwaway protocol/run delete) | `ALLOW_MUTATIONS`; `flex-test crs-off-c` | `no-current` |
+| **A+B+C** | Full CRS-off API pass with timing JSON | `ALLOW_MUTATIONS`; `flex-test api-suite` | A/C `no-current`, B `current-idle` |
 | **D** | Disruptive / install / destructive | Explicit capability + mutations | declare per capability |
 | **E** | Physical motion (home, move, run play) | Explicit operator request only | declare per scenario |
 | **Blocked** | `PATCH /auth/settings/accessControlEnabled` | Always refused | n/a |
 
-Tier B uses existing robot resources when present. Pass `--create-fixtures` to
-upload `docs/test-suggestions/protocols/pyro_smoke_no_motion.py`, a tiny CSV,
-and ensure a **current idle** run when fixtures / run state are missing.
+Tier B uses existing robot resources when present (after `seed-runs`, history
+usually supplies commands + annotations). Pass `--create-fixtures` to upload
+`docs/test-suggestions/protocols/pyro_smoke_no_motion.py`, a tiny CSV,
+clientData key, a short maintenance-run command fixture, and ensure a
+**current idle** run when fixtures / run state are missing.
+
+Path-param sources:
+
+| Token | Source |
+|-------|--------|
+| `{runId}` (most run GETs) | Current-idle suite run |
+| `{runId}` + `{commandId}` under `/runs/…/commands/…` | Historical seeded run that has commands (`command_run_id`) |
+| `{commandId}` under `/commands/…` | Simple command store (`GET /commands`) |
+| `{commandAnnotationId}` | Seeded `simple_home_move` (`group_steps`, apiLevel 2.29) |
+| `{key}`, `{log_identifier}`, `{subsystem}`, update `{id}`, `{pipette_id}`, `{username}` | Robot inventory / clientData put |
+| maintenance `{runId}` / `{commandId}` | Current maintenance run, or throwaway create+`waitForDuration(0)` |
+| `{calibrationId}`, update `{session}` | Placeholders (Flex removed labware calibrations; no install session) → soft 404/410 |
+
+`GET /runs/{runId}/commandsAsPreSerializedList` returns **503**
+`PreSerializedCommandsNotAvailable` while the run is still current/active
+(robot-server: only after a run has ended). Tier B resolves this path against an
+**ended** run id (historical non-current run, or uncurrent+recreate when
+creating fixtures). Brief store-settle retries only; do not soft-accept 503.
+
+Live CRS-off A+B+C on KansasFLEX (`v9.1.2-alpha.6`): Tier A 51/0, Tier B 35/0
+(skipped=0), Tier C 7/0 via `flex-test api-suite`.
 
 ## CRS-on suite (deferred)
 
@@ -158,16 +182,20 @@ Unchanged from [safety-model.md](safety-model.md):
 ## Workstreams
 
 1. **Catalog + Tier A**: done (`flex-test probe`).
-2. **Domain clients + Tier B/C**: done (`protocols` / `runs` / `data_files` /
-   `client_data` / `robot_control`; `flex-test crs-off-b|crs-off-c`).
+2. **Domain clients + Tier B/C + api-suite**: done (`protocols` / `runs` /
+   `data_files` / `client_data` / `robot_control` / `camera` /
+   `error_recovery` / `labware_offsets` / `maintenance_runs`;
+   `flex-test crs-off-b|crs-off-c|api-suite`).
 3. **Run-state preflight**: done for Tier A/B/C (`flex-test run-state`,
    `--run-state` / `--ensure-run-state`). Expand matrix for played / succeeded
    groups when Tier E scenarios land.
-4. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
-5. **OAuth + users clients**: prepare dual-mode session (no enable).
-6. **CRS-on authorization matrix**: after restore path; map to QA checklist sections
+4. **CRS-off Tier C expansion**: more of the ~57 reversible catalog mutations
+   beyond the current 7 cleanup steps.
+5. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
+6. **OAuth + users clients**: prepare dual-mode session (no enable).
+7. **CRS-on authorization matrix**: after restore path; map to QA checklist sections
    (login, roles, settings, logs).
-7. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
+8. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
 
 ## Related harness docs
 

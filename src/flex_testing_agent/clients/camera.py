@@ -54,13 +54,44 @@ class CameraClient:
         live_stream_enabled: bool | None = None,
         error_recovery_camera_enabled: bool | None = None,
     ) -> dict[str, Any]:
-        """POST camera enablement (mutating)."""
-        data: dict[str, Any] = {"cameraEnabled": camera_enabled}
-        if live_stream_enabled is not None:
-            data["liveStreamEnabled"] = live_stream_enabled
-        if error_recovery_camera_enabled is not None:
-            data["errorRecoveryCameraEnabled"] = error_recovery_camera_enabled
+        """POST camera enablement (mutating).
+
+        robot-server requires all three booleans; omitted stream/recovery flags
+        are filled from the current ``GET /camera`` values.
+        """
+        if live_stream_enabled is None or error_recovery_camera_enabled is None:
+            current = await self.get_camera()
+            if live_stream_enabled is None:
+                live_stream_enabled = bool(current.get("liveStreamEnabled", False))
+            if error_recovery_camera_enabled is None:
+                error_recovery_camera_enabled = bool(
+                    current.get("errorRecoveryCameraEnabled", False)
+                )
+        data: dict[str, Any] = {
+            "cameraEnabled": camera_enabled,
+            "liveStreamEnabled": live_stream_enabled,
+            "errorRecoveryCameraEnabled": error_recovery_camera_enabled,
+        }
         return await self._session.post_json("/camera", json_body={"data": data})
+
+    async def set_stream_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """POST ``/camera/stream/settings`` (full LiveStreamSettings body)."""
+        return await self._session.post_json(
+            "/camera/stream/settings",
+            json_body={"data": settings},
+            expected_status=(200, 201),
+        )
+
+    async def set_capture_settings(
+        self,
+        settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        """POST ``/camera/cameraSettings`` (capture image settings)."""
+        return await self._session.post_json(
+            "/camera/cameraSettings",
+            json_body={"data": settings},
+            expected_status=(200, 201),
+        )
 
     async def take_picture(self, *, timeout: float = 60.0) -> bytes:
         """POST ``/camera/picture`` and return JPEG bytes."""

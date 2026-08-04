@@ -34,21 +34,23 @@ Small, reviewable pull requests. Each PR should be independently understandable.
    driven by that catalog (`flex-test probe`).
 
 10. **Domain clients for CRS-off Tier B/C**  
-    Protocols, runs, data files, clientData, lights; parameterized GET fixtures.
-    (`flex-test crs-off-b`)
+    Done: protocols, runs, data files, clientData, lights, camera, errorRecovery,
+    labwareOffsets, maintenance runs; parameterized GET fixtures + `api-suite`.
+    (`flex-test crs-off-b|crs-off-c|api-suite`)
 
 10a. **Run-state preflight for suites**  
-    Snapshot / verify / ensure `no-current` vs `current-idle` before Tier A/B/C
-    (`orchestration/run_state.py`, `flex-test run-state`). Matrix in
+    Done: snapshot / verify / ensure `no-current` vs `current-idle` before
+    Tier A/B/C (`orchestration/run_state.py`, `flex-test run-state`). Matrix in
     [crs-testing.md](crs-testing.md).
 
-10b. **Known-state setup + latency**  
-    Clear robot-server data, apply Kansas deck, record install/boot/play timings
-    for Pyro vs non-Pyro compare. Design: [known-state-and-latency.md](known-state-and-latency.md).
-    CLI: `reset-data`, `known-state`, `timing`. Seed-run motion history next.
+10b. **Known-state setup + latency + seed-runs**  
+    Done: clear robot-server data, Kansas deck, seed inventory (incl. pause/
+    failed/`group_steps` annotations, scripted LPC), install/boot timings.
+    Design: [known-state-and-latency.md](known-state-and-latency.md).
 
-11. **CRS-off mutating suite**  
-    Gated Tier C (`flex-test crs-off-c`); Tier D still mostly install/explicit.
+11. **CRS-off mutating suite expansion**  
+    Tier C sample done (`flex-test crs-off-c`, 7 reversible steps). Expand over
+    remaining reversible catalog; Tier D still mostly install/explicit.
 
 12. **User / OAuth clients (CRS-on prep)**  
     Document and implement `/auth/users`, `POST /oauth2/token`, scopes from

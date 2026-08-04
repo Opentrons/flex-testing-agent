@@ -6,6 +6,7 @@ HTTP inventory for CRS-off Tier A). This client only issues GET requests.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -121,6 +122,7 @@ class EndpointProbeResult:
     status_code: int | None = None
     error: str | None = None
     payload: Any = None
+    duration_seconds: float | None = None
 
 
 @dataclass
@@ -168,6 +170,7 @@ class ReadonlyClient:
         """GET every catalogued read-only endpoint and collect results."""
         report = ReadonlyProbeReport()
         for endpoint in endpoints:
+            t0 = time.perf_counter()
             try:
                 payload = await self.get(
                     endpoint.path, timeout=endpoint.timeout_seconds
@@ -180,6 +183,7 @@ class ReadonlyClient:
                         ok=True,
                         status_code=200,
                         payload=payload,
+                        duration_seconds=time.perf_counter() - t0,
                     )
                 )
             except RobotApiError as exc:
@@ -196,6 +200,7 @@ class ReadonlyClient:
                         status_code=exc.status_code,
                         error=None if acceptable else str(exc),
                         payload=None,
+                        duration_seconds=time.perf_counter() - t0,
                     )
                 )
         return report

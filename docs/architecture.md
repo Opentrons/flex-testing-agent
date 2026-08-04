@@ -26,8 +26,11 @@ Small async `httpx` wrappers in `src/flex_testing_agent/clients/`:
 - `AuthSettingsClient`: `GET /auth/settings/accessControlEnabled` (detect only)
 - `ProtocolsClient` / `RunsClient` / `DataFilesClient`: protocol upload, run create
   (no play), CSV files for CRS-off Tier B fixtures
-- `ClientDataClient` / `RobotControlClient`: reversible Tier C mutations (lights,
-  clientData)
+- `MaintenanceRunsClient` / `LabwareOffsetsClient`: scripted LPC seed + Tier B
+  maintenance command fixtures
+- `ClientDataClient` / `RobotControlClient` / `CameraClient` /
+  `ErrorRecoveryClient`: reversible Tier C mutations (lights, clientData,
+  camera enable/stream settings, errorRecovery)
 
 Clients are independent of scenarios and agents. They raise explicit timeout/API errors.
 
@@ -44,7 +47,9 @@ Capabilities in `src/flex_testing_agent/capabilities/` compose client calls into
 - Evidence production
 - Mutation-gate checks
 
-Milestone 1 ships `inspect_robot` (`READ_ONLY`). Enabling access control is explicitly blocked.
+Capabilities include `inspect`, `probe`, `crs_off` Tier B/C, `api_suite`,
+`seed_runs` / `seed_lpc`, install, reset-data, and known-state. Enabling access
+control is explicitly blocked.
 
 ### 3. Scenarios and orchestration
 

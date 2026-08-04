@@ -8,8 +8,11 @@ from flex_testing_agent.clients.auth_settings import AuthSettingsClient
 from flex_testing_agent.clients.camera import CameraClient
 from flex_testing_agent.clients.client_data import ClientDataClient
 from flex_testing_agent.clients.data_files import DataFilesClient
+from flex_testing_agent.clients.error_recovery import ErrorRecoveryClient
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.health import HealthClient
+from flex_testing_agent.clients.labware_offsets import LabwareOffsetsClient
+from flex_testing_agent.clients.maintenance_runs import MaintenanceRunsClient
 from flex_testing_agent.clients.modules import ModulesClient
 from flex_testing_agent.clients.protocols import ProtocolsClient
 from flex_testing_agent.clients.readonly import ReadonlyClient
@@ -59,6 +62,9 @@ class FlexRobot:
         self.modules = ModulesClient(self._session)
         self.protocols = ProtocolsClient(self._session)
         self.runs = RunsClient(self._session)
+        self.maintenance_runs = MaintenanceRunsClient(self._session)
+        self.labware_offsets = LabwareOffsetsClient(self._session)
+        self.error_recovery = ErrorRecoveryClient(self._session)
         self.data_files = DataFilesClient(self._session)
         self.client_data = ClientDataClient(self._session)
         self.robot_control = RobotControlClient(self._session)

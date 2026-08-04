@@ -36,6 +36,14 @@ uv run flex-test probe --ensure-run-state   # uncurrent if needed
 uv run flex-test probe --no-picture
 uv run flex-test probe --picture ./artifacts/camera/kansasflex.jpg
 
+# CRS-off A+B+C suite (fixtures + reversible mutations; docs/crs-testing.md)
+ALLOW_MUTATIONS=true uv run flex-test api-suite
+ALLOW_MUTATIONS=true uv run flex-test crs-off-b --create-fixtures
+ALLOW_MUTATIONS=true uv run flex-test crs-off-c
+
+# Seed succeeded/paused/failed/LPC history for Tier B (physical motion)
+ALLOW_MUTATIONS=true uv run flex-test seed-runs
+
 # Published Flex robot OS versions (CDN manifests)
 uv run flex-test releases
 uv run flex-test releases --channel internal

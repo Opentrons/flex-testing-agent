@@ -48,7 +48,8 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 | Capability | Entry |
 |------------|--------|
 | Inspect snapshot | `flex-test inspect` / `capabilities/inspect.py` |
-| Probe read-only APIs + summary | `flex-test probe` / `capabilities/probe.py` |
+| Probe / CRS-off A+B+C | `flex-test probe\|crs-off-b\|c\|api-suite` |
+| Seed run history / LPC | `flex-test seed-runs` / `capabilities/seed_runs.py` |
 | Camera JPEG | `clients/camera.py` (via probe) |
 | Release catalog | `flex-test releases` / `releases/` |
 | Install robot OS | `flex-test put\|install` / `capabilities/install.py` |
@@ -80,6 +81,8 @@ cp .env.example .env   # set ROBOT_HOST
 uv run flex-test inspect
 uv run flex-test probe
 uv run flex-test releases
+ALLOW_MUTATIONS=true uv run flex-test api-suite
+ALLOW_MUTATIONS=true uv run flex-test seed-runs
 ALLOW_MUTATIONS=true uv run flex-test put <version>
 # Internal / Pyro stack:
 ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal

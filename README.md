@@ -16,29 +16,24 @@ The core product is a reusable Python harness. Cursor, MCP, and other agent runt
 - Persist runs, snapshots, evidence, and findings
 - Support deterministic scenarios now, and bounded agent exploration later
 
-## Current scope (milestone 1)
+## Current scope
 
 Implemented:
 
 - Typed configuration via environment / `.env`
-- Async atomic clients: health, update health, access-control detection
-- `FlexRobot` + `inspect_robot` capability
-- CLI: `uv run flex-test inspect`
-- CLI: `uv run flex-test releases` (latest internal/external robot OS builds)
-- CLI: `uv run flex-test put <version>` / `install` (robot OS install; requires `ALLOW_MUTATIONS=true`)
-- SQLite persistence + Alembic migrations
-- Evidence capture under `ARTIFACT_DIRECTORY`
+- Async clients: health, update, protocols/runs, camera, offsets, maintenance, etc.
+- CLI: `inspect`, `probe`, `releases`, `put`/`install`, `run-state`, `crs-off-b|c`, `api-suite`
+- Known-state + seed history: `reset-data`, `known-state`, `seed-runs` (motion; gated)
+- SQLite persistence + Alembic migrations; evidence under `ARTIFACT_DIRECTORY`
 - Unit and mocked integration tests
 - Local reference clones under `upstream/` (gitignored): `opentrons`, `robot-stack`
 
 Not implemented yet:
 
 - Enabling access control (intentionally blocked; one-way on robot)
-- User provisioning / authorization matrix
-- Software build installation onto Kansas
-- First-class physical motion capabilities (live play only via explicit operator HTTP smoke; see pyro-testing.md)
-- Autonomous agent runtime
-- Local web UI
+- CRS-on authorization matrix / user provisioning
+- Full catalog mutation coverage beyond Tier C sample
+- Autonomous agent runtime / local web UI
 - OEM / factory mode (ignored by design)
 
 ## Architecture overview
@@ -106,15 +101,21 @@ Default pytest selection excludes `requires_robot` and `mutates_robot`.
 uv run flex-test inspect
 ```
 
-Expected summary fields:
+Expected summary fields: robot name/host, connectivity, installed versions,
+access-control state, health, run id, evidence directory.
 
-- Robot name / host
-- Connectivity
-- Installed software and service versions
-- Access-control state (`disabled` / `enabled` / `unknown` / `unsupported`)
-- Health status
-- Run identifier
-- Evidence directory
+## CRS-off API suite and seed history
+
+```bash
+# Read-only Tier A catalog probe
+uv run flex-test probe
+
+# Full A+B+C with timing (mutations + fixtures; see docs/crs-testing.md)
+ALLOW_MUTATIONS=true uv run flex-test api-suite
+
+# Seed succeeded/paused/failed/LPC history for Tier B path params (motion)
+ALLOW_MUTATIONS=true uv run flex-test seed-runs
+```
 
 ## Listing published Flex releases
 

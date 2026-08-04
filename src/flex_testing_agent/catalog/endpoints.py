@@ -214,6 +214,15 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         risk_level=RiskLevel.READ_ONLY,
         required_scopes=("users.read.others",),
         parameterized=True,
+        notes=(
+            "Auth-server user lookup; CRS-off often 401/404 for a synthetic username."
+        ),
+        crs_off_acceptable_status=(
+            200,
+            401,
+            403,
+            404,
+        ),
     ),
     EndpointSpec(
         name="get_auth_users_self",
@@ -760,6 +769,11 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         service=ApiService.ROBOT_SERVER,
         group="calibration",
         risk_level=RiskLevel.READ_ONLY,
+        notes="Removed on Flex (LabwareCalibrationEndpointsRemoved); expect 410.",
+        crs_off_acceptable_status=(
+            200,
+            410,
+        ),
     ),
     EndpointSpec(
         name="get_labware_calibrations_calibrationId",
@@ -769,6 +783,12 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         group="calibration",
         risk_level=RiskLevel.READ_ONLY,
         parameterized=True,
+        notes="Removed on Flex (LabwareCalibrationEndpointsRemoved); expect 410.",
+        crs_off_acceptable_status=(
+            200,
+            404,
+            410,
+        ),
     ),
     EndpointSpec(
         name="get_labwareOffsets",
@@ -1052,6 +1072,11 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         group="protocols",
         risk_level=RiskLevel.READ_ONLY,
         parameterized=True,
+        notes=(
+            "Only available after a run has ended (robot-server "
+            "PreSerializedCommandsNotAvailable while current/active). Tier B "
+            "probes an ended run id; do not soft-accept 503."
+        ),
     ),
     EndpointSpec(
         name="get_runs_runId_currentState",
@@ -1118,6 +1143,11 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         group="settings",
         risk_level=RiskLevel.READ_ONLY,
         parameterized=True,
+        notes="OT-2 only (NotSupportedOnFlex); Flex returns 403 by design.",
+        crs_off_acceptable_status=(
+            200,
+            403,
+        ),
     ),
     EndpointSpec(
         name="get_settings_reset_options",

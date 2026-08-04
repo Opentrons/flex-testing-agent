@@ -22,6 +22,14 @@ def test_parse_seed_ids_accepts_hyphen_or_underscore() -> None:
 
 
 @pytest.mark.unit
+def test_parse_seed_ids_new_pause_and_failed() -> None:
+    assert parse_seed_ids(["pause_mid_run", "failed-intentional"]) == [
+        SeedId.PAUSE_MID_RUN,
+        SeedId.FAILED_INTENTIONAL,
+    ]
+
+
+@pytest.mark.unit
 def test_parse_seed_ids_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="Unknown seed id"):
         parse_seed_ids(["not-a-seed"])

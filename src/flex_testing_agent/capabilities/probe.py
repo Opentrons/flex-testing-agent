@@ -173,6 +173,7 @@ async def probe_robot(
                 "ok": r.ok,
                 "status_code": r.status_code,
                 "error": r.error,
+                "duration_seconds": r.duration_seconds,
             }
             for r in report.results
         ],

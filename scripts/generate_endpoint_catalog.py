@@ -87,7 +87,11 @@ ACCEPTABLE_OVERRIDES: dict[tuple[str, str], tuple[int, ...]] = {
     ("GET", "/calibration/pipette_offset"): (200, 403),
     ("GET", "/calibration/tip_length"): (200, 403),
     ("GET", "/settings/pipettes"): (200, 403),
+    ("GET", "/settings/pipettes/{pipette_id}"): (200, 403),
+    ("GET", "/labware/calibrations"): (200, 410),
+    ("GET", "/labware/calibrations/{calibrationId}"): (200, 404, 410),
     ("GET", "/auth/users/self"): (200, 401, 403, 404),
+    ("GET", "/auth/users/byUsername/{username}"): (200, 401, 403, 404),
     ("GET", "/system/authorize"): (200, 401, 403, 422),
     ("GET", "/system/connected"): (200, 404),
     ("GET", "/audit/external/logPeriods"): (200, 404),
@@ -105,6 +109,18 @@ NOTES_OVERRIDES = {
     ("GET", "/settings/pipettes"): (
         "OT-2 only (NotSupportedOnFlex); Flex returns 403 by design."
     ),
+    ("GET", "/settings/pipettes/{pipette_id}"): (
+        "OT-2 only (NotSupportedOnFlex); Flex returns 403 by design."
+    ),
+    ("GET", "/labware/calibrations"): (
+        "Removed on Flex (LabwareCalibrationEndpointsRemoved); expect 410."
+    ),
+    ("GET", "/labware/calibrations/{calibrationId}"): (
+        "Removed on Flex (LabwareCalibrationEndpointsRemoved); expect 410."
+    ),
+    ("GET", "/auth/users/byUsername/{username}"): (
+        "Auth-server user lookup; CRS-off often 401/404 without a real user."
+    ),
     ("GET", "/system/authorize"): (
         "Deprecated; bare GET without authenticationBearer header yields 422."
     ),
@@ -113,6 +129,10 @@ NOTES_OVERRIDES = {
     ),
     ("GET", "/wifi/list"): "Wi-Fi scan; may be slow.",
     ("GET", "/robot/positions"): "Legacy control path; may 403/500 depending on build.",
+    ("GET", "/runs/{runId}/commandsAsPreSerializedList"): (
+        "Only available after a run has ended (PreSerializedCommandsNotAvailable "
+        "while current/active). Tier B probes an ended run; do not soft-accept 503."
+    ),
     (
         "GET",
         "/audit/external/logPeriods",

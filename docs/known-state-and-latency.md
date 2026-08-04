@@ -25,8 +25,8 @@ work. We need:
 | **1. Clear robot-server data** | `flex-test reset-data` | DISRUPTIVE | `POST /settings/reset` with `runsHistory` (protocols, runs, offsets, …). Do **not** clear `authorizedKeys` by default. |
 | **2. Deck config** | part of known-state setup | REVERSIBLE | PUT known cutouts (HS on D1, trash A3, slots). |
 | **3. LPC / offsets** | part of known-state setup | REVERSIBLE + motion if probe | Prefer applying known offsets via HTTP when full probe LPC is blocked; live LPC only with explicit motion gate. |
-| **4. Seed run history** | `flex-test seed-runs` (planned) | PHYSICAL_MOTION | Dry deck, tip detection / sensing off, real motion; see inventory below. |
-| **5. Suite probes** | `probe` / `crs-off-*` / latency | varies | Always run-state preflight (`docs/crs-testing.md`). |
+| **4. Seed run history** | `flex-test seed-runs` | PHYSICAL_MOTION | Dry deck, tip detection / sensing off, real motion; see inventory below. |
+| **5. Suite probes** | `probe` / `crs-off-*` / `api-suite` / latency | varies | Always run-state preflight (`docs/crs-testing.md`). |
 
 Phase 0 → 1 → 2 are safe to automate without tip pickup. Phase 3–4 need an
 operator-confirmed clear deck and attached instruments/modules.
@@ -54,15 +54,42 @@ unless `--strict`.
 
 | Seed id | Outcome | Motions / modules | Notes |
 |---------|---------|-------------------|-------|
-| `simple_home_move` | succeeded | home + simple moves (right P50) | Simple commands only |
+| `simple_home_move` | succeeded | home + grouped move to trash (right P50, apiLevel 2.29 `group_steps`) | Short motion + real `commandAnnotations` for Tier B |
 | `complex_transfer_dry` | succeeded | pick/place style dry moves, both pipettes if safe | Complex PE commands; tip detection off |
 | `heater_shaker_brief` | succeeded | HS target **37 °C** (API min; ambient not allowed), shake **&lt; 5 s**, then deactivate | Labware on HS adapter optional; no long heat soak |
 | `cancel_mid_run` | stopped | start play, cancel after first motion / N commands | Mid-run cancel path |
 | `camera_and_comments` | succeeded | short motion + `POST /camera/picture` or run preview + run comments | Pictures + comments during run |
-| `idle_current` | idle / uncurrent | create current run, never play | For `current-idle` suite preflight |
+| `failed_intentional` | failed | play short protocol that raises `RuntimeError` | Failed terminal history |
+| `pause_mid_run` | paused → stopped | play, pause (verify), then stop to free current (uncurrent while paused is 409) | Mid-run pause path; stopped afterward so later seeds can run |
+| `idle_current` | idle (current) | create current run, never play | For `current-idle` suite preflight |
+| `lpc_scripted` | offset stored | maintenance-run load + high-Z approach + small jogs + `POST /labwareOffsets` | Not a `.py` protocol; virtual tiprack on **C2** |
 
-Add more states only when product APIs expose them cleanly (paused, errored
-recovery). Prefer explicit seeds over hoping leftover UI state survives.
+Prefer these explicit seeds over hoping leftover UI state survives. Full
+`seed-runs` uncurrents the paused run so `idle_current` can remain the current
+fixture for Tier B.
+
+## Scripted LPC HTTP map (`lpc_scripted`)
+
+Flex LPC is not exposed as a single “run LPC” endpoint. The app drives a
+**maintenance run** (commands execute when enqueued) and then persists offsets
+via **`/labwareOffsets`**.
+
+| Step | Method / path | Purpose |
+|------|---------------|---------|
+| Create session | `POST /maintenance_runs` | Current maintenance run |
+| Drive LPC-like motion | `POST /maintenance_runs/{id}/commands?waitUntilComplete=true&timeout=…` | `loadPipette`, `loadLabware`, `home`, `moveToWell`, `moveRelative`, `savePosition` |
+| Persist offset | `POST /labwareOffsets` | `StoredLabwareOffsetCreate`: `definitionUri`, `locationSequence` (`onAddressableArea`), `vector` |
+| Read / clear | `GET` / `DELETE /labwareOffsets`, `POST /labwareOffsets/searches` | Inventory / reset |
+| Cleanup | `DELETE /maintenance_runs/{id}` | Drop maintenance run after seed |
+
+Optional related routes: `POST …/labware_offsets`, `POST …/labware_definitions`
+on the maintenance run (run-scoped offsets / defs). Harness clients:
+`clients/maintenance_runs.py`, `clients/labware_offsets.py`. Capability:
+`capabilities/seed_lpc.py`.
+
+Deck: keep trash **A3** and HS **D1**; seed uses free slot **C2** with a
+definition-only tiprack load and high Z (`+40 mm` above well top) so dry deck
+without a physical tiprack is safer. Door must be closed (`requiresClosedDoor`).
 
 ## Latency metrics (every phase records spans)
 
@@ -83,6 +110,8 @@ Timing module: `orchestration/timing.py` → JSON under
 | `run.play_to_first_command` | POST play | first command `succeeded`/`running` | PE / Pyro path |
 | `run.cancel_latency` | POST stop | status `stopped` | |
 | `camera.picture` | POST picture | 200 JPEG | current-run interactions |
+| `lpc.create_maintenance_run` | POST maintenance_runs | 201 | LPC seed |
+| `lpc.store_offset` | POST labwareOffsets | 201 | LPC seed persist |
 
 Always stamp: robot `system_version`, `api_version`, host, channel, whether
 feature flags look like protocol/hardware subprocess (when readable).
@@ -103,6 +132,7 @@ uv run flex-test timing show
 ALLOW_MUTATIONS=true uv run flex-test known-state
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
 ALLOW_MUTATIONS=true uv run flex-test seed-runs --seed simple_home_move
+ALLOW_MUTATIONS=true uv run flex-test seed-runs --seed lpc_scripted
 ```
 
 Python: import capabilities (`reset_robot_data`, `install_build`, timing
@@ -124,9 +154,17 @@ Local archives (gitignored):
 
 | Archive | Path |
 |---------|------|
-| Non-Pyro baseline | `artifacts/timing/baseline-9.1.2-alpha.5/` |
+| Non-Pyro baseline (prior) | `artifacts/timing/baseline-9.1.2-alpha.5/` |
+| Non-Pyro baseline (current) | `artifacts/timing/baseline-9.1.2-alpha.6/` |
 | Pyro compare (partial) | `artifacts/timing/pyro-4.0.0-alpha.10/` |
 | Extra Pyro retry | `artifacts/timing/seed-runs-ea0a7a48-*.json` (not copied into archive yet) |
+
+**alpha.6 notes (2026-08-04):** install from `ot3@4.0.0-alpha.10` succeeded.
+First full `seed-runs` was 6/7: `camera_and_comments` failed with
+`CameraDisabledError` after `reset-data` (camera off). Enabled via
+`POST /camera`, then camera seed retry succeeded
+(`seed-runs-3be0bdd4-…`). Seed preflight now enables the camera so this does
+not repeat. Use `0d060ba8` for non-camera/LPC spans; `3be0bdd4` for camera.
 
 **Do not share raw numbers without these caveats.**
 

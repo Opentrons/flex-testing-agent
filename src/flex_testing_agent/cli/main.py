@@ -95,7 +95,8 @@ _SEED_OPTION = typer.Option(
     help=(
         "Seed id to run (repeatable). Default: all. "
         "Ids: simple_home_move, complex_transfer_dry, heater_shaker_brief, "
-        "cancel_mid_run, camera_and_comments, idle_current."
+        "cancel_mid_run, camera_and_comments, failed_intentional, idle_current, "
+        "pause_mid_run, lpc_scripted."
     ),
 )
 _INSTALLED_OPTION = typer.Option(
@@ -628,6 +629,85 @@ def probe_command(
             )
 
         return 0 if summary.probe_failed == 0 else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("api-suite")
+def api_suite_command(
+    no_picture: bool = typer.Option(
+        False,
+        "--no-picture",
+        help="Skip Tier A camera capture.",
+    ),
+    no_create_fixtures: bool = typer.Option(
+        False,
+        "--no-create-fixtures",
+        help="Do not upload protocol/CSV / create run for Tier B.",
+    ),
+    protocol: Path | None = _PROTOCOL_OPTION,
+) -> None:
+    """CRS-off Tier A + B + C with timing JSON (ALLOW_MUTATIONS required).
+
+    Order: probe (no-current) → parameterized GETs (current-idle) →
+    reversible mutations (no-current). See docs/crs-testing.md.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.api_suite import run_api_suite
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await run_api_suite(
+                    robot,
+                    take_picture=not no_picture,
+                    create_fixtures=not no_create_fixtures,
+                    protocol_path=protocol,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        table = Table(title="API suite (CRS-off A/B/C)")
+        table.add_column("Tier")
+        table.add_column("OK")
+        table.add_column("Failed")
+        table.add_column("Notes")
+        counts = result.counts
+        table.add_row(
+            "A probe",
+            str(counts.get("tier_a_ok")),
+            str(counts.get("tier_a_failed")),
+            (result.tier_a.picture_error if result.tier_a else None) or "",
+        )
+        table.add_row(
+            "B parameterized",
+            str(counts.get("tier_b_ok")),
+            str(counts.get("tier_b_failed")),
+            f"skipped={counts.get('tier_b_skipped')}",
+        )
+        table.add_row(
+            "C mutations",
+            str(counts.get("tier_c_ok")),
+            str(counts.get("tier_c_failed")),
+            "",
+        )
+        console.print(table)
+        if result.detail:
+            console.print(f"[yellow]{result.detail}[/yellow]")
+        if result.timing_path:
+            console.print(f"timing={result.timing_path}")
+        return 0 if result.ok else 1
 
     raise SystemExit(asyncio.run(_run()))
 

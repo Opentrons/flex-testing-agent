@@ -32,6 +32,14 @@ def test_timing_session_span_and_write(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
+def test_timing_session_record() -> None:
+    session = TimingSession(label="unit")
+    span = session.record("api.a.get.health", 0.042, ok=True, detail="/health")
+    assert span.duration_seconds == 0.042
+    assert session.spans[0].name == "api.a.get.health"
+
+
+@pytest.mark.unit
 def test_kansas_deck_cutouts_fills_hs_serial() -> None:
     cutouts = kansas_deck_cutouts(heater_shaker_serial="HS123")
     hs = next(c for c in cutouts if c["cutoutId"] == "cutoutD1")

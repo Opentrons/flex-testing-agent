@@ -122,6 +122,29 @@ class TimingSession:
     ) -> TimingSpan:
         return self.stop(name, ok=False, detail=detail, meta=meta)
 
+    def record(
+        self,
+        name: str,
+        duration_seconds: float,
+        *,
+        ok: bool = True,
+        detail: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> TimingSpan:
+        """Append an already-measured span (e.g. per-endpoint latency)."""
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        span = TimingSpan(
+            name=name,
+            started_at=now,
+            ended_at=now,
+            duration_seconds=duration_seconds,
+            ok=ok,
+            detail=detail,
+            meta=dict(meta or {}),
+        )
+        self.spans.append(span)
+        return span
+
     @contextmanager
     def span(self, name: str, *, meta: dict[str, Any] | None = None) -> Iterator[None]:
         """Sync context manager for a timed block."""

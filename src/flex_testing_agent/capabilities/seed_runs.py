@@ -39,8 +39,9 @@ PROTOCOLS_DIR = (
 SEED_RUNS_DESCRIPTOR = CapabilityDescriptor(
     name="seed_runs",
     description=(
-        "Upload/analyze/play seed protocols to build known run history with "
-        "real motion (dry deck). PHYSICAL_MOTION; operator-requested only."
+        "Upload/analyze/play seed protocols (and scripted LPC) to build known "
+        "run history with real motion (dry deck). PHYSICAL_MOTION; "
+        "operator-requested only."
     ),
     risk_level=RiskLevel.PHYSICAL_MOTION,
     mutates_robot=True,
@@ -50,6 +51,7 @@ SEED_RUNS_DESCRIPTOR = CapabilityDescriptor(
         "ALLOW_MUTATIONS=true",
         "Operator explicitly requested live motion / seed-runs",
         "Deck clear except trash A3 and heater-shaker D1",
+        "Free slot C2 for lpc_scripted virtual tiprack",
     ],
 )
 
@@ -60,7 +62,10 @@ class SeedId(StrEnum):
     HEATER_SHAKER_BRIEF = "heater_shaker_brief"
     CANCEL_MID_RUN = "cancel_mid_run"
     CAMERA_AND_COMMENTS = "camera_and_comments"
+    FAILED_INTENTIONAL = "failed_intentional"
     IDLE_CURRENT = "idle_current"
+    PAUSE_MID_RUN = "pause_mid_run"
+    LPC_SCRIPTED = "lpc_scripted"
 
 
 @dataclass(frozen=True)
@@ -69,6 +74,8 @@ class SeedSpec:
     protocol_file: str
     play: bool
     cancel_after_start: bool = False
+    pause_after_start: bool = False
+    leave_current: bool = False
     capture_camera: bool = False
     expected_terminal: tuple[str, ...] = ("succeeded",)
 
@@ -107,11 +114,33 @@ SEED_SPECS: tuple[SeedSpec, ...] = (
         expected_terminal=("succeeded",),
     ),
     SeedSpec(
+        SeedId.FAILED_INTENTIONAL,
+        "seed_failed_intentional.py",
+        play=True,
+        expected_terminal=("failed",),
+    ),
+    SeedSpec(
+        SeedId.PAUSE_MID_RUN,
+        "seed_pause_mid_run.py",
+        play=True,
+        pause_after_start=True,
+        # Uncurrent after pause so idle_current can become the current fixture.
+        leave_current=False,
+        expected_terminal=("paused",),
+    ),
+    SeedSpec(
         SeedId.IDLE_CURRENT,
         "seed_idle_current.py",
         play=False,
+        leave_current=True,
         expected_terminal=("idle",),
     ),
+)
+
+# Ordered inventory; ``lpc_scripted`` is HTTP maintenance-run driven (no .py).
+ALL_SEED_IDS: tuple[SeedId, ...] = (
+    *(s.seed_id for s in SEED_SPECS),
+    SeedId.LPC_SCRIPTED,
 )
 
 
@@ -215,6 +244,15 @@ async def _preflight(
         ):
             await settings_client.set_setting(setting_id, True)
             info[setting_id] = True
+
+    # reset-data / factory defaults leave the camera off; captureImage needs it.
+    camera = CameraClient(robot.session)
+    async with timing.aspan("preflight.enable_camera"):
+        status = await camera.get_camera()
+        enabled = bool(status.get("cameraEnabled"))
+        if not enabled:
+            status = await camera.set_camera_enabled(camera_enabled=True)
+        info["cameraEnabled"] = bool(status.get("cameraEnabled", True))
 
     subsystems = SubsystemsClient(robot.session)
     needing = await subsystems.subsystems_needing_update()
@@ -358,6 +396,7 @@ async def _run_one_seed(
             except Exception as exc2:
                 camera_error = f"picture={exc}; preview={exc2}"
 
+    pause_ok: bool | None = None
     if spec.cancel_after_start:
         timing.start(f"{prefix}.cancel")
         await robot.runs.stop(run_id)
@@ -371,6 +410,37 @@ async def _run_one_seed(
         span = timing.spans[-1]
         if span.duration_seconds is not None:
             local_timings["run.cancel_latency"] = span.duration_seconds
+    elif spec.pause_after_start:
+        timing.start(f"{prefix}.pause")
+        await robot.runs.pause(run_id)
+        final_status = await _wait_run_status(
+            robot,
+            run_id,
+            wanted={"paused", "stopped", "failed", "succeeded"},
+            timeout_seconds=180.0,
+        )
+        timing.stop(f"{prefix}.pause")
+        span = timing.spans[-1]
+        if span.duration_seconds is not None:
+            local_timings["run.pause_latency"] = span.duration_seconds
+        # Paused runs cannot be uncurrented (409). Stop to free current unless
+        # this seed intentionally leaves a current paused fixture.
+        if not spec.leave_current and final_status == "paused":
+            timing.start(f"{prefix}.stop_after_pause")
+            await robot.runs.stop(run_id)
+            final_status = await _wait_run_status(
+                robot,
+                run_id,
+                wanted={"stopped", "failed", "succeeded"},
+                timeout_seconds=180.0,
+            )
+            timing.stop(f"{prefix}.stop_after_pause")
+            span = timing.spans[-1]
+            if span.duration_seconds is not None:
+                local_timings["run.stop_after_pause"] = span.duration_seconds
+            pause_ok = True
+        else:
+            pause_ok = final_status in spec.expected_terminal
     else:
         final_status = await _wait_run_status(
             robot,
@@ -379,9 +449,22 @@ async def _run_one_seed(
             timeout_seconds=900.0,
         )
 
-    ok = final_status in spec.expected_terminal
-    # Uncurrent finished runs so the next seed can become current.
-    if spec.seed_id is not SeedId.IDLE_CURRENT:
+    if pause_ok is not None:
+        ok = pause_ok
+        detail = (
+            None if ok else f"expected {spec.expected_terminal}, got {final_status}"
+        )
+        if ok and not spec.leave_current and final_status == "stopped":
+            detail = "paused then stopped to free current run"
+    else:
+        ok = final_status in spec.expected_terminal
+        detail = (
+            None if ok else f"expected {spec.expected_terminal}, got {final_status}"
+        )
+
+    # Uncurrent finished runs so the next seed can become current, unless the
+    # seed is meant to leave a current fixture (idle / paused).
+    if not spec.leave_current:
         try:
             await robot.runs.set_current(run_id, current=False)
         except RobotApiError as exc:
@@ -393,10 +476,30 @@ async def _run_one_seed(
         protocol_id=protocol_id,
         run_id=run_id,
         final_status=final_status,
-        detail=None if ok else f"expected {spec.expected_terminal}, got {final_status}",
+        detail=detail,
         camera_path=camera_path,
         camera_error=camera_error,
         timings=local_timings,
+    )
+
+
+async def _run_lpc_seed(
+    robot: FlexRobot,
+    timing: TimingSession,
+) -> SeedOutcome:
+    """Scripted LPC via maintenance_runs + persisted /labwareOffsets."""
+    from flex_testing_agent.capabilities.seed_lpc import run_seed_lpc_scripted
+
+    result = await run_seed_lpc_scripted(robot, timing)
+    return SeedOutcome(
+        seed_id=SeedId.LPC_SCRIPTED.value,
+        ok=result.ok,
+        run_id=result.maintenance_run_id,
+        final_status="offset_stored" if result.ok else "failed",
+        detail=result.detail
+        if result.detail
+        else (f"offset_id={result.offset_id}; commands={len(result.commands)}"),
+        timings=result.timings,
     )
 
 
@@ -425,16 +528,18 @@ async def run_seed_runs(
     except Exception as exc:
         timing.note(f"health: {exc}")
 
-    selected = {s.seed_id for s in SEED_SPECS}
+    selected = set(ALL_SEED_IDS)
     if seed_ids is not None:
         selected = set(seed_ids)
     specs = [s for s in SEED_SPECS if s.seed_id in selected]
+    run_lpc = SeedId.LPC_SCRIPTED in selected
 
     preflight = await _preflight(robot, timing, update_firmware=update_firmware)
     robot.raw_evidence["seed_preflight"] = preflight
 
     picture_dir = robot.settings.ensure_artifact_directory() / "camera" / "seed-runs"
     outcomes: list[SeedOutcome] = []
+    stopped_early = False
     for spec in specs:
         log.info("seed_start", seed_id=spec.seed_id.value)
         try:
@@ -451,7 +556,28 @@ async def run_seed_runs(
             mode="json"
         )
         if strict and not outcome.ok:
+            stopped_early = True
             break
+
+    if run_lpc and not stopped_early:
+        log.info("seed_start", seed_id=SeedId.LPC_SCRIPTED.value)
+        try:
+            outcome = await _run_lpc_seed(robot, timing)
+        except Exception as exc:
+            outcome = SeedOutcome(
+                seed_id=SeedId.LPC_SCRIPTED.value,
+                ok=False,
+                detail=str(exc),
+            )
+            log.info(
+                "seed_failed",
+                seed_id=SeedId.LPC_SCRIPTED.value,
+                error=str(exc),
+            )
+        outcomes.append(outcome)
+        robot.raw_evidence[f"seed_{SeedId.LPC_SCRIPTED.value}"] = outcome.model_dump(
+            mode="json"
+        )
 
     path = timing.write(robot.settings.ensure_artifact_directory() / "timing")
     result = SeedRunsResult(
