@@ -18,5 +18,8 @@ public GitHub Pages site.
 
 ## Schema
 
-See [SCHEMA.md](SCHEMA.md). Validated example:
-`9.1.2-module-usb-reconnect.yaml`.
+See [SCHEMA.md](SCHEMA.md). Validated examples:
+
+- `9.1.2-module-usb-reconnect.yaml`
+- `4.0.0-alpha.10-pyro-subprocess.yaml` (Pyro / protocol-subprocess; narrative in
+  [../pyro-testing.md](../pyro-testing.md); sample protocols under `protocols/`)

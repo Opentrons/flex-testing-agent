@@ -36,7 +36,7 @@ Not implemented yet:
 - Enabling access control (intentionally blocked; one-way on robot)
 - User provisioning / authorization matrix
 - Software build installation onto Kansas
-- Physical motion
+- First-class physical motion capabilities (live play only via explicit operator HTTP smoke; see pyro-testing.md)
 - Autonomous agent runtime
 - Local web UI
 - OEM / factory mode (ignored by design)
@@ -133,9 +133,13 @@ This reads public `ot3-oe/releases.json` manifests (internal + external hosts fr
 uv run flex-test put 9.1.2-alpha.0
 # equivalent:
 uv run flex-test install 9.1.2-alpha.0 --channel external
+# Internal / ot3@ stack (Pyro subprocess builds):
+uv run flex-test put 4.0.0-alpha.10 --channel internal
 ```
 
 This downloads the published `ot3-system.zip` for that version, uploads it through update-server (`/server/update/*`), commits, restarts, and verifies `system_version`.
+
+On internal Pyro builds, `/health` may return nginx **502** for several minutes after commit while firmware flashes and robot-server attaches to the nameserver. See [docs/pyro-testing.md](docs/pyro-testing.md).
 
 ## Running robot integration tests
 
@@ -151,10 +155,11 @@ These tests are read-only. No test mutates a physical robot unless explicitly se
 - This harness talks to a **real robot**.
 - Access control (`PATCH /auth/settings/accessControlEnabled`) is **one-way**. This harness never enables it.
 - Mutations are disabled by default (`ALLOW_MUTATIONS=false`).
-- Physical motion capabilities are out of scope.
+- First-class physical motion capabilities are out of scope; live protocol play only with explicit operator request and deck preflight.
 - Prefer dry-run and read-only inspect while developing.
+- Re-check `ROBOT_HOST` before installs (lab DHCP can move the robot).
 
-See [docs/safety-model.md](docs/safety-model.md).
+See [docs/safety-model.md](docs/safety-model.md). For internal Pyro / protocol-subprocess validation on KansasFLEX, see [docs/pyro-testing.md](docs/pyro-testing.md).
 
 ## Current limitations
 
@@ -185,6 +190,7 @@ Authoring guide: [docs/test-suggestions/README.md](docs/test-suggestions/README.
 
 - [Architecture](docs/architecture.md)
 - [Robot versions and releases](docs/robot-versions.md)
+- [Pyro / protocol-subprocess testing](docs/pyro-testing.md)
 - [Monorepo release pattern](docs/monorepo-releases.md) (`opentrons/opentrons` / `chore_release-*`)
 - [Source research](docs/source-research.md)
 - [Prior-art review](docs/prior-art-review.md)

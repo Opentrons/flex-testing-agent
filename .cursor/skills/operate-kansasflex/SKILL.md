@@ -3,8 +3,9 @@ name: operate-kansasflex
 description: >-
   Operates the local Opentrons Flex KansasFLEX through flex-testing-agent CLI
   and Python APIs. Use when inspecting robot state, probing read-only endpoints,
-  taking camera pictures, listing Flex OS releases, or installing a robot OS
-  build with ALLOW_MUTATIONS.
+  taking camera pictures, listing Flex OS releases, installing a robot OS build
+  with ALLOW_MUTATIONS, or running Pyro / protocol-subprocess validation on
+  internal Flex builds.
 ---
 
 # Operate KansasFLEX
@@ -14,11 +15,12 @@ description: >-
 - `.env` with `ROBOT_HOST` (and usually `ROBOT_NAME=KansasFLEX`)
 - `uv sync --all-extras`
 - Mutations only when `.env` has `ALLOW_MUTATIONS=true`
+- **Always re-check `ROBOT_HOST`**: lab DHCP can move the robot (seen `.20` → `.21`)
 
 ## Preferred commands
 
 ```bash
-# Read-only snapshot
+# Read-only snapshot (also confirms host reachability)
 uv run flex-test inspect
 
 # Full read-only endpoint probe + optional camera JPEG
@@ -28,10 +30,63 @@ uv run flex-test probe --picture ./artifacts/camera/kansasflex.jpg
 
 # Published Flex robot OS versions (CDN manifests)
 uv run flex-test releases
+uv run flex-test releases --channel internal
 
 # Install OS build (mutates; needs ALLOW_MUTATIONS=true)
 uv run flex-test put 9.1.2-alpha.0
+# Internal / ot3@ stack (Pyro subprocess builds):
+ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
 ```
+
+## Post-install recovery (internal / Pyro builds)
+
+After `put`, update-server may already show the new version while nginx `/health`
+returns **502** for several minutes (firmware flash + robot-server Pyro startup).
+That is often expected; see [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787).
+
+1. Wait for `/health` 200, or SSH and watch services / FW progress.
+2. SSH (lab key, not committed):
+
+```bash
+ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST
+```
+
+3. Ordered recovery if still broken after FW idle:
+
+```text
+opentrons-pyro-nameserver → opentrons-hardware-api → wait OT3API in NS → opentrons-robot-server
+```
+
+Full suite, SSH checks, restart failure modes, and live tip smoke:
+`docs/pyro-testing.md`. Checklist YAML:
+`docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml`.
+
+## Pyro / protocol-subprocess smoke
+
+On internal builds with `enableHardwareSubprocess` / `enableProtocolSubprocess`
+default on (`/data/feature_flags.json`):
+
+- Prefer product HTTP (`/health`, `/instruments`, `/runs`, door status) over raw
+  Pyro `Proxy` without the Opentrons Serpent type registry.
+- Store protocol/run IDs as **bare UUIDs** only (never `PROTO_ID=<uuid>` in files
+  you `cat` into JSON).
+- Suites A–D: NS health, restart recovery (RQA-5789/5790), door, upload/analyze/create-run,
+  uncurrent leak (RQA-5791), serialization (see `docs/pyro-testing.md`).
+- On-robot Serpent registry over SSH: use writable `HOME` (e.g. `/tmp/ot-home`);
+  `/root/.opentrons` is often read-only.
+- Helper: `scripts/run_pyro_d_suite.sh` (needs recovery if orphan `ot-protocol` processes linger).
+
+## Live protocol play (physical motion)
+
+The harness has **no first-class motion capability**. Do **not** invent one or
+play protocols unless the user **explicitly** asks for live motion / tip smoke.
+
+When explicitly requested:
+
+1. Confirm deck/instruments (tiprack position, clear deck, door closed, estop clear).
+2. Use a documented protocol under `docs/test-suggestions/protocols/`.
+3. Drive play via robot HTTP run actions (or future gated capability), not ad-hoc shell.
+4. Prefer `return_tip` when no trash is loaded.
 
 ## Python entrypoints
 
@@ -47,13 +102,15 @@ Use `FlexRobot` as async context manager. Prefer capabilities over raw clients f
 ## Safety reminders
 
 - Never enable access control
-- Do not run physical motion
+- Do not implement harness motion capabilities; live play only on explicit user request
 - Default pytest excludes `requires_robot` / `mutates_robot`
 - Live robot tests: `uv run pytest -m requires_robot`
+- Service restarts and run mutations may need operator approval in agent sessions
 
 ## Artifacts
 
 Evidence and photos land under `ARTIFACT_DIRECTORY` (default `./artifacts/`).
+Local pyro notes often under `artifacts/pyro-tests/` (gitignored).
 
 ## Test suggestions (GitHub Pages)
 

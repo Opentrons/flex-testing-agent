@@ -8,7 +8,11 @@ This harness operates against a physical Flex robot. Safety is enforced in code 
 2. **Exclusive robot lock** per host under `ARTIFACT_DIRECTORY/locks/`.
 3. **Mutations disabled by default** (`ALLOW_MUTATIONS=false`).
 4. **Dry-run blocks mutations** (`DRY_RUN=true`).
-5. **Physical motion is out of scope** and always rejected.
+5. **Physical motion capabilities are out of scope** for the harness API
+   (`PHYSICAL_MOTION` risk stays rejected / unimplemented). Operators may still
+   request a **one-off live protocol play** via robot HTTP (for example Pyro tip
+   smoke in [pyro-testing.md](pyro-testing.md)) after explicit consent and deck
+   preflight. Do not turn that into an ungated `flex-test` motion command yet.
 6. **No arbitrary shell / HTTP / URL construction** for agents.
 7. **Credential redaction** in evidence writers.
 8. **Access control must not be enabled** by this harness.

@@ -11,17 +11,22 @@ This harness talks to a **real** Flex (KansasFLEX). Follow `docs/safety-model.md
 
 - Mutations default **off** (`ALLOW_MUTATIONS=false`). Require explicit enablement for installs, camera enable, etc.
 - Never enable access control (`PATCH /auth/settings/accessControlEnabled` is one-way)
-- Never implement physical motion capabilities in this milestone
+- Do **not** add first-class physical motion capabilities to the harness in this milestone
+- Live protocol **play** (homes / tip pickup) is allowed only when the user **explicitly** requests it, with deck preflight; prefer HTTP run actions and documented protocols under `docs/test-suggestions/protocols/`
 - Use exclusive robot lock for scenarios that touch the robot
 - All HTTP calls need timeouts via `RobotHttpSession` / settings
 - Redact secrets in evidence; do not commit `.env` or credentials
 - Prefer read-only clients/capabilities unless the user explicitly asks to mutate
+- Re-verify `ROBOT_HOST` before mutating or playing (DHCP can change the IP)
 
 ## Risk levels
 
 `READ_ONLY` → `REVERSIBLE_MUTATION` → `DISRUPTIVE` → `INSTALLATION` → `DESTRUCTIVE` → `PHYSICAL_MOTION`
 
-Gate mutating work with `ensure_mutation_allowed`. Physical motion is always rejected.
+Gate mutating work with `ensure_mutation_allowed`. Harness APIs that would
+encode motion as a reusable capability stay rejected / unimplemented; operator-
+requested live play via robot HTTP is an exception documented in
+`docs/pyro-testing.md` and `docs/safety-model.md`.
 
 ## Robot identity
 

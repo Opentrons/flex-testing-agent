@@ -82,3 +82,9 @@ When access control is enabled later, `RobotHttpSession` can attach an optional 
 ## Future agent integration
 
 Capability descriptors (`CapabilityDescriptor`) already carry name, description, risk, schemas, and evidence lists. A future bounded agent may only call allowlisted `READ_ONLY` and carefully controlled reversible capabilities. Arbitrary shell, arbitrary HTTP, and arbitrary robot URLs stay forbidden.
+
+## Related operator docs
+
+- [Pyro / protocol-subprocess testing](pyro-testing.md) on internal Flex builds (SSH + HTTP suites; harness gaps)
+- [Safety model](safety-model.md)
+- Published checklists: [test-suggestions/](test-suggestions/)

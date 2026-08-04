@@ -54,8 +54,26 @@ Grow `flex-testing-agent` through the existing layers. Do not bypass clients wit
 - [ ] make lint && make test pass
 ```
 
+## Natural next surfaces (learned from Pyro testing)
+
+Do **not** add ad-hoc SSH/curl from agents. When growing the harness for
+internal Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
+
+| Gap | Suggested layering |
+|-----|--------------------|
+| Post-install waiter (long 502 + FW flash) | `capabilities/install.py` or companion waiter |
+| Pyro / service health correlation | read-only capability (+ optional SSH later), not raw shell |
+| Protocol upload / analyze / create-run | typed clients → gated capabilities |
+| Run play / tip smoke | `PHYSICAL_MOTION` risk; only with explicit gates + operator request |
+| Door / instruments already via HTTP | extend `READONLY_ENDPOINTS` / probe summary if useful |
+
+Restart recovery failures (nameserver / hardware-api reattach) are product bugs
+to regression-test once fixed, not something the harness should paper over by
+silently restarting services unless the user asks for recovery.
+
 ## References
 
 - Architecture: `docs/architecture.md`
 - Safety: `docs/safety-model.md`
 - Versions: `docs/robot-versions.md`
+- Pyro / subprocess testing: `docs/pyro-testing.md`

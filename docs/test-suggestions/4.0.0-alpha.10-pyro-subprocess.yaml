@@ -1,0 +1,219 @@
+id: 4.0.0-alpha.10-pyro-subprocess
+title: Pyro / protocol-subprocess smoke (Flex internal 4.0.0-alpha.10)
+summary: >
+  Validated suite for Pyro5 IPC on KansasFLEX after installing internal
+  ot3@4.0.0-alpha.10 (hardware + protocol subprocess flags default on).
+  Covers systemd/nameserver health, restart recovery failures, HTTP hardware
+  paths, door events, protocol upload/analyze/create-run, process teardown
+  leak, and a live P50 tip pickup/return smoke. Full narrative:
+  docs/pyro-testing.md. Parent bug epic: RQA-5786.
+status: validated
+updated: "2026-08-03"
+release:
+  monorepo_branch: edge
+  compared_to_tag: ot3@4.0.0-alpha.9
+  robot_os: 4.0.0-alpha.10
+  tickets:
+    - key: RQA-5786
+      title: "4.0.0-alpha.10 Bugs"
+    - key: RQA-5787
+      title: "Pyro: robot-server fails Application startup / nginx 502 after update while hardware-api firmware flash is in progress"
+    - key: RQA-5788
+      title: "Pyro: TypeError unhashable type 'dict' when robot-server updates subsystems via OT3API proxy"
+    - key: RQA-5789
+      title: "Pyro: after nameserver restart, OT3API / robot-server-resource never re-register"
+    - key: RQA-5790
+      title: "Pyro: robot-server does not reattach after hardware-api restart (stale OT3API proxy → HTTP 500)"
+    - key: RQA-5791
+      title: "Pyro: uncurrenting a run removes ot-protocol from nameserver but leaves run_process_entry_point processes running"
+    - key: EXEC-2187
+      title: "Protocol Subprocesses (Current)"
+    - key: RQA-5796
+      title: "Pyro: GET /runs/{id}/commands returns empty list for succeeded runs (totalLength=0) on ot3@4.0.0-alpha.10"
+    - key: RQA-5797
+      title: "Pyro/alpha.10: legacy runs fail StateSummary load (cameraSettings.errorRecoveryCameraEnabled required)"
+  prs:
+    - number: 22022
+      title: "feat(api): Update subprocess feature flags to default to On"
+    - number: 22094
+      title: "fix(api): Update hardware entrypoint API instance reference and update Pyro interface to support property fset and fdel"
+hardware_required:
+  - flex_1channel_50 (right)
+  - opentrons_flex_96_filtertiprack_50ul in A1 (for C3-live only)
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test probe --no-picture
+    - ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+    - "ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST"
+tests:
+  - id: A1
+    name: Systemd pyro stack active
+    why: Nameserver must precede hardware-api and robot-server for IPC.
+    steps:
+      - SSH to KansasFLEX.
+      - "Run: systemctl is-active opentrons-pyro-nameserver opentrons-hardware-api opentrons-robot-server"
+      - Expect all active and enabled.
+    result: pass
+    notes: "Validated 2026-07-31 on ot3@4.0.0-alpha.10 after install + recovery"
+  - id: A2
+    name: OT3API registered on nameserver
+    why: Hardware entrypoint notifies ready only after OT3API is listed.
+    steps:
+      - "With Pyro5, locate_ns() and confirm OT3API in ns.list() within 60s."
+      - "Optional: Proxy(resolve('PYRONAME:OT3API')).get_fw_version()."
+    result: pass
+    notes: "Present in ~0.05s when healthy; fw version 72"
+  - id: A3
+    name: Health OK with HW proxy path
+    why: robot-server identify_hardware_process depends on NS + OT3API.
+    steps:
+      - "Run uv run flex-test inspect and/or GET /health; expect 200."
+      - "GET /instruments and /subsystems/status populate."
+    result: pass
+  - id: A4
+    name: Nameserver restart recovery
+    why: Producers should re-register or dependents should fail clearly.
+    steps:
+      - Baseline NS includes OT3API and robot-server-resource.
+      - "Run: systemctl restart opentrons-pyro-nameserver"
+      - "Poll NS 90s; note /health and unit active states."
+    result: fail
+    notes: "RQA-5789: app names never re-register; /health can stay 200; services stay active"
+  - id: A5
+    name: Hardware-api restart reattach
+    why: robot-server must refresh OT3API proxy after HW daemon URI changes.
+    steps:
+      - "Note OT3API URI; run: systemctl restart opentrons-hardware-api"
+      - "Confirm new OT3API URI; poll /health and /instruments for 2 minutes without restarting robot-server."
+    result: fail
+    notes: "RQA-5790: HTTP 500 CommunicationError to stale port until robot-server restart"
+  - id: B1
+    name: Instruments and subsystems via HTTP
+    why: Lower-line IPC must serve robot-server instrument inventory.
+    steps:
+      - "GET /instruments and /subsystems/status."
+      - Expect pipettes ok and subsystem fw versions present.
+    result: pass
+    notes: "left p50_multi + right p50_single; subsystems fw 72"
+  - id: B2
+    name: Module nested proxies
+    why: "pyro_behavior attached_modules should expose module proxies."
+    steps:
+      - "Attach a module; GET /modules; optional on-robot Proxy list."
+    result: skipped
+    notes: "No modules attached on KansasFLEX during validation"
+  - id: B3
+    name: Door open/close via HTTP
+    why: Door watcher / HW door events must surface through robot-server.
+    steps:
+      - "Poll GET /robot/door/status while opening and closing the door."
+      - "Confirm closed to open to closed; optionally match hardware-api DoorSwitchStateInfo logs."
+    result: pass
+    notes: "Two full cycles 2026-07-31; currentState does not include door (expected)"
+  - id: C1
+    name: Create run registers ot-protocol
+    why: Run lifetime should own a protocol subprocess + NS name.
+    steps:
+      - Upload docs/test-suggestions/protocols/pyro_smoke_no_motion.py (or equivalent).
+      - "Wait analysis completed; POST /runs with protocolId."
+      - "Confirm NS has ot-protocol and ps shows run_process_entry_point."
+    result: pass
+  - id: C2
+    name: Protocol analysis completes
+    why: Analysis path uses simulating / subprocess machinery.
+    steps:
+      - After upload, poll protocol analysisSummaries until completed.
+      - GET analysis document; expect result ok (or record errors).
+    result: pass
+  - id: C3a
+    name: Idle run actions contract
+    why: Actions must cross robot-server to ot-protocol Pyro boundary.
+    steps:
+      - "On idle run: pause expects 409; stop accepted on this build; cancel is not a valid actionType."
+    result: pass
+  - id: C3b
+    name: Live tip smoke play
+    why: Play must execute motion commands across the protocol subprocess boundary.
+    steps:
+      - "Deck tiprack A1; use protocols/pyro_live_p50_tip_smoke.py; door closed; estop disengaged; play; wait succeeded."
+      - Store bare UUIDs only in helper files (not PROTO_ID= prefix).
+    result: pass
+    notes: "Live tip smoke run 1c4e5cce-… succeeded (summary pipette+labware). Post-hoc GET /commands empty: RQA-5796."
+  - id: C6
+    name: Uncurrent tears down process
+    why: "Spec: protocol process lifetime matches run record create to uncurrent."
+    steps:
+      - "With current run and ot-protocol in NS, PATCH run current=false."
+      - "Confirm NS drops ot-protocol and no orphan run_process_entry_point remains."
+    result: fail
+    notes: "RQA-5791: NS cleared but ot-protocol and ot-simulating-protocol processes remained under robot-server"
+  - id: D1
+    name: Door enum via HTTP
+    why: DoorState must serialize through robot-server product path.
+    steps:
+      - "GET /robot/door/status; expect open or closed."
+    result: pass
+    notes: "closed"
+  - id: D2
+    name: DoorState via Proxy with registry
+    why: Specialty enums require Opentrons Serpent registry on the client.
+    steps:
+      - "SSH with HOME writable (e.g. /tmp/ot-home); PYTHONPATH=/opt/opentrons-robot-server."
+      - "register_hardware_types(); Proxy(OT3API).door_state is DoorState."
+    result: pass
+    notes: "DoorState.CLOSED"
+  - id: D3
+    name: attached_instruments with registry
+    why: NonBuiltinKeyDictWrapper / Mount keys must deserialize with registry.
+    steps:
+      - "With register_hardware_types, read attached_instruments; expect Mount keys and pipette name dicts."
+    result: pass
+    notes: "LEFT p50_multi_flex, RIGHT p50_single_flex"
+  - id: D4
+    name: Run currentState payload
+    why: StateSummary-shaped HTTP payload must load for a current run.
+    steps:
+      - "Create current run; GET /runs/{id}/currentState; expect tipStates/estopEngaged (or similar)."
+    result: pass
+  - id: D4b
+    name: Legacy StateSummary persistence
+    why: Older stored StateSummary JSON must still validate or migrate.
+    steps:
+      - "GET /runs; note any ok=false RunDataError InvalidStoredData on StateSummary."
+    result: fail
+    notes: "RQA-5797: cameraSettings.errorRecoveryCameraEnabled required"
+  - id: D5a
+    name: Analysis command slices
+    why: Pydantic command models must round-trip on analysis path.
+    steps:
+      - "GET protocol analysis document; confirm commands list (e.g. home/comment)."
+    result: pass
+  - id: D5b
+    name: Succeeded run command history
+    why: Executed run commands must persist and list via HTTP.
+    steps:
+      - "GET /runs/{succeededTipSmokeId}/commands?pageLength=100; expect totalLength > 0."
+    result: fail
+    notes: "RQA-5796: tip smoke 1c4e5cce-… and other same-day runs return totalLength=0"
+  - id: D6
+    name: Invalid request error surface
+    why: Error responses must serialize cleanly over HTTP.
+    steps:
+      - "POST loadPipette with mount=not_a_mount; expect InvalidRequest / errorCode 4000."
+    result: pass
+  - id: D7
+    name: Subsystems status healthy
+    why: Regression check for RQA-5788 unhashable dict on subsystem path.
+    steps:
+      - "GET /subsystems/status; expect all subsystems ok."
+    result: pass
+    notes: "6 subsystems ok; fw 72"
+  - id: D8
+    name: Raw Proxy without registry (negative)
+    why: Specialty types must fail closed without registry (not silent wrong values).
+    steps:
+      - "Proxy(OT3API).door_state and attached_instruments without register_hardware_types."
+      - Expect SerializeError (or similar) rather than wrong primitive values.
+    result: pass
+    notes: "SerializeError DoorState and NonBuiltinKeyDictWrapper"

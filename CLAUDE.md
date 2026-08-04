@@ -14,6 +14,7 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 - [docs/architecture.md](docs/architecture.md) — layers and extension model
 - [docs/safety-model.md](docs/safety-model.md) — mutation gates, AC one-way rule
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
+- [docs/pyro-testing.md](docs/pyro-testing.md) — Pyro5 / protocol-subprocess on internal Flex builds
 - Cursor rules under [`.cursor/rules/`](.cursor/rules/)
 - Skills under [`.cursor/skills/`](.cursor/skills/) (`extend-flex-harness`, `operate-kansasflex`)
 
@@ -66,9 +67,10 @@ Published test suggestions (YAML → GitHub Pages on `main`): [docs/test-suggest
 
 - Mutations off unless `ALLOW_MUTATIONS=true`
 - Never enable access control (API is one-way)
-- No physical motion in this milestone
+- No first-class physical motion capabilities; live protocol play only if the user explicitly asks (see `docs/pyro-testing.md`)
 - Timeouts on all robot HTTP
 - Do not commit `.env` or secrets
+- Re-check `ROBOT_HOST` (DHCP can move KansasFLEX)
 
 ## Common commands
 
@@ -79,6 +81,9 @@ uv run flex-test inspect
 uv run flex-test probe
 uv run flex-test releases
 ALLOW_MUTATIONS=true uv run flex-test put <version>
+# Internal / Pyro stack:
+ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
 ```
 
 Operate against the robot via skill: `.cursor/skills/operate-kansasflex/SKILL.md`.
+Pyro validation checklist: `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml`.
