@@ -8,26 +8,28 @@ This harness operates against a physical Flex robot. Safety is enforced in code 
 2. **Exclusive robot lock** per host under `ARTIFACT_DIRECTORY/locks/`.
 3. **Mutations disabled by default** (`ALLOW_MUTATIONS=false`).
 4. **Dry-run blocks mutations** (`DRY_RUN=true`).
-5. **Physical motion capabilities are out of scope** for the harness API
-   (`PHYSICAL_MOTION` risk stays rejected / unimplemented). Operators may still
-   request a **one-off live protocol play** via robot HTTP (for example Pyro tip
-   smoke in [pyro-testing.md](pyro-testing.md)) after explicit consent and deck
-   preflight. Do not turn that into an ungated `flex-test` motion command yet.
+5. **Physical motion is gated** (`PHYSICAL_MOTION` requires `ALLOW_MUTATIONS=true`
+   and an explicit operator request). The supported entrypoint is
+   `flex-test seed-runs` ([known-state-and-latency.md](known-state-and-latency.md)).
+   Do not invent ad-hoc motion URLs or ungated home/move CLI commands.
 6. **No arbitrary shell / HTTP / URL construction** for agents.
 7. **Credential redaction** in evidence writers.
 8. **Access control must not be enabled** by this harness.
 
-## Access control
+## Access control / CRS
 
-Enabling access control via `PATCH /auth/settings/accessControlEnabled` accepts only `true` and cannot be undone through the public API. Treat enablement as `DISRUPTIVE`.
+**CRS** (Compliance Ready Software) maps to `accessControlEnabled`. Enabling via
+`PATCH /auth/settings/accessControlEnabled` accepts only `true` and cannot be
+undone through the public API. Treat enablement as `DISRUPTIVE`.
 
-Milestone 1:
+Harness policy:
 
 - Detect via GET only
 - Capability `enable_access_control` is unimplemented and blocked
-- Prefer testing with access control **off**
+- Prefer thorough testing with CRS **off** first ([crs-testing.md](crs-testing.md))
 
-Future AC-on testing requires a documented restore path (for example lab SSH wipe) before any enable capability is considered.
+Future CRS-on testing requires a documented restore path (for example serial /
+lab wipe per EXEC-2176) before any enable capability is considered.
 
 ## Risk levels
 

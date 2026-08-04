@@ -24,6 +24,10 @@ Small async `httpx` wrappers in `src/flex_testing_agent/clients/`:
 - `HealthClient`: `GET /health`
 - `UpdateHealthClient`: `GET /server/update/health`
 - `AuthSettingsClient`: `GET /auth/settings/accessControlEnabled` (detect only)
+- `ProtocolsClient` / `RunsClient` / `DataFilesClient`: protocol upload, run create
+  (no play), CSV files for CRS-off Tier B fixtures
+- `ClientDataClient` / `RobotControlClient`: reversible Tier C mutations (lights,
+  clientData)
 
 Clients are independent of scenarios and agents. They raise explicit timeout/API errors.
 
@@ -50,6 +54,8 @@ Orchestration owns:
 
 - Exclusive robot lock (`filelock` per host)
 - Run context / IDs
+- Protocol-run presence preflight (`run_state.py`: verify / ensure
+  `no-current` vs `current-idle` for CRS suites)
 - Mutation and dry-run gates
 - Persistence and evidence wiring
 
@@ -73,11 +79,20 @@ MCP is a transport for tools. The harness must remain usable from:
 
 Making MCP foundational would couple robot safety and auditability to one agent protocol. Instead, capability descriptors declare schemas and risk so any adapter can expose the same allowlist.
 
-## Dual-mode access control
+## Dual-mode CRS (access control)
 
-When `accessControlEnabled` is false (default on many robots), protected endpoints allow unauthenticated access. Inspect runs without credentials.
+**CRS** (Compliance Ready Software) is the product name for robot
+`accessControlEnabled` (also called ACM / RCS in older docs). Design and suite
+tiers: [crs-testing.md](crs-testing.md).
 
-When access control is enabled later, `RobotHttpSession` can attach an optional bearer token. Milestone 1 does not implement login or enablement. Testing with AC off remains the primary path.
+When CRS is off (default for KansasFLEX lab work), protected endpoints allow
+unauthenticated access. Inspect and `flex-test probe` run without credentials.
+The full HTTP inventory lives in `catalog/endpoints.py` (all methods); Tier A
+CRS-off coverage is parameter-free GETs via `ReadonlyClient`.
+
+When CRS is enabled later, `RobotHttpSession` can attach an optional bearer
+token. This harness does not implement enablement (one-way API). CRS-on matrix
+testing waits on a restore path.
 
 ## Future agent integration
 

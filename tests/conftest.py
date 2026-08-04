@@ -24,6 +24,8 @@ def settings(tmp_artifacts: Path, tmp_path: Path) -> Settings:
     db_path = tmp_path / "test.db"
     return Settings(
         robot_host="127.0.0.1",
+        # Keep discovery scoped to the mocked host in unit/integration tests.
+        robot_host_candidates="",
         robot_name="KansasFLEX",
         robot_http_port=31950,
         robot_use_https=False,
@@ -41,7 +43,7 @@ def settings(tmp_artifacts: Path, tmp_path: Path) -> Settings:
 def sample_health_payload() -> dict[str, object]:
     """Minimal valid /health payload shaped like robot-server Health."""
     return {
-        "name": "Kansas",
+        "name": "KansasFLEX",
         "robot_model": "OT-3 Standard",
         "api_version": "8.5.0",
         "fw_version": "v1.0.0",

@@ -13,9 +13,11 @@ description: >-
 ## Prerequisites
 
 - `.env` with `ROBOT_HOST` (and usually `ROBOT_NAME=KansasFLEX`)
+- Optional `ROBOT_HOST_CANDIDATES=192.168.0.21,192.168.0.20` (defaults in settings)
 - `uv sync --all-extras`
 - Mutations only when `.env` has `ALLOW_MUTATIONS=true`
-- **Always re-check `ROBOT_HOST`**: lab DHCP can move the robot (seen `.20` → `.21`)
+- CLI/runners **probe candidates** via `GET /health` and bind the live host
+  (DHCP has moved KansasFLEX between `.20` and `.21`)
 
 ## Preferred commands
 
@@ -23,8 +25,14 @@ description: >-
 # Read-only snapshot (also confirms host reachability)
 uv run flex-test inspect
 
-# Full read-only endpoint probe + optional camera JPEG
+# Protocol-run presence (suites verify this; see docs/crs-testing.md)
+uv run flex-test run-state
+ALLOW_MUTATIONS=true uv run flex-test run-state --ensure no-current
+ALLOW_MUTATIONS=true uv run flex-test run-state --ensure current-idle
+
+# Full read-only endpoint probe + optional camera JPEG (default: no-current)
 uv run flex-test probe
+uv run flex-test probe --ensure-run-state   # uncurrent if needed
 uv run flex-test probe --no-picture
 uv run flex-test probe --picture ./artifacts/camera/kansasflex.jpg
 
@@ -32,10 +40,16 @@ uv run flex-test probe --picture ./artifacts/camera/kansasflex.jpg
 uv run flex-test releases
 uv run flex-test releases --channel internal
 
-# Install OS build (mutates; needs ALLOW_MUTATIONS=true)
-uv run flex-test put 9.1.2-alpha.0
+# Install OS build (mutates; needs ALLOW_MUTATIONS=true); records timing JSON
+ALLOW_MUTATIONS=true uv run flex-test put 9.1.2-alpha.5 --channel external
 # Internal / ot3@ stack (Pyro subprocess builds):
 ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+
+# Known-state baseline (clear robot-server DB + Kansas deck; no play)
+ALLOW_MUTATIONS=true uv run flex-test reset-data
+ALLOW_MUTATIONS=true uv run flex-test known-state
+uv run flex-test timing
+# Design: docs/known-state-and-latency.md
 ```
 
 ## Post-install recovery (internal / Pyro builds)

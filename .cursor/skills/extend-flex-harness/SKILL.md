@@ -22,8 +22,11 @@ Grow `flex-testing-agent` through the existing layers. Do not bypass clients wit
    - Keep methods small and named after API paths.
    - Export from `clients/__init__.py` when it is part of the public client surface.
 3. **Wire onto `FlexRobot`** (`robots/flex.py`) if operators should access it via the facade.
-4. **For GET coverage**, add a `ReadonlyEndpoint` to `READONLY_ENDPOINTS` in `clients/readonly.py`.
-   - Use `acceptable_status` for expected 403/404 (document in `notes`).
+4. **For HTTP coverage**, update the CRS catalog (preferred) then probe GETs:
+   - Regenerate or extend `catalog/endpoints.py` (`scripts/generate_endpoint_catalog.py`)
+   - Parameter-free GETs flow into `READONLY_ENDPOINTS` via `endpoints_for_crs_off_get_probe`
+   - Use `crs_off_acceptable_status` / notes for expected 403/404
+   - See `docs/crs-testing.md`
 5. **For an operation**, add a capability in `capabilities/`:
    - `CapabilityDescriptor` with risk level and evidence list
    - Call `ensure_mutation_allowed` when risk is mutating

@@ -6,11 +6,18 @@ from typing import Any
 
 from flex_testing_agent.clients.auth_settings import AuthSettingsClient
 from flex_testing_agent.clients.camera import CameraClient
+from flex_testing_agent.clients.client_data import ClientDataClient
+from flex_testing_agent.clients.data_files import DataFilesClient
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.health import HealthClient
 from flex_testing_agent.clients.modules import ModulesClient
+from flex_testing_agent.clients.protocols import ProtocolsClient
 from flex_testing_agent.clients.readonly import ReadonlyClient
+from flex_testing_agent.clients.robot_control import RobotControlClient
+from flex_testing_agent.clients.robot_settings import RobotSettingsClient
+from flex_testing_agent.clients.runs import RunsClient
 from flex_testing_agent.clients.session import RobotHttpSession
+from flex_testing_agent.clients.subsystems import SubsystemsClient
 from flex_testing_agent.clients.update import UpdateClient
 from flex_testing_agent.clients.update_health import UpdateHealthClient
 from flex_testing_agent.config.settings import Settings
@@ -50,6 +57,13 @@ class FlexRobot:
         self.camera = CameraClient(self._session)
         self.readonly = ReadonlyClient(self._session)
         self.modules = ModulesClient(self._session)
+        self.protocols = ProtocolsClient(self._session)
+        self.runs = RunsClient(self._session)
+        self.data_files = DataFilesClient(self._session)
+        self.client_data = ClientDataClient(self._session)
+        self.robot_control = RobotControlClient(self._session)
+        self.robot_settings = RobotSettingsClient(self._session)
+        self.subsystems = SubsystemsClient(self._session)
         self._raw_evidence: dict[str, Any] = {}
 
     @property

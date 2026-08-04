@@ -29,7 +29,7 @@ def test_robot_base_url_https() -> None:
 
 @pytest.mark.unit
 def test_require_robot_host_raises_when_empty() -> None:
-    settings = Settings(robot_host="")
+    settings = Settings(robot_host="", robot_host_candidates="")
     with pytest.raises(ValueError, match="ROBOT_HOST"):
         settings.require_robot_host()
 

@@ -17,7 +17,7 @@ def test_health_report_from_robot_server_shape(
     sample_health_payload: dict[str, object],
 ) -> None:
     report = HealthReport.model_validate(sample_health_payload)
-    assert report.name == "Kansas"
+    assert report.name == "KansasFLEX"
     assert report.api_version == "8.5.0"
     assert report.disk_details is not None
     assert report.disk_details.system_available_mb == 10000.0
@@ -50,6 +50,6 @@ def test_snapshot_derived_fields(
             raw_enabled=False,
         ),
     )
-    assert snapshot.robot_display_name == "Kansas"
+    assert snapshot.robot_display_name == "KansasFLEX"
     assert snapshot.installed_software_version == "2026.1.0"
     assert snapshot.api_version == "8.5.0"

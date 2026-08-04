@@ -29,14 +29,10 @@ def ensure_mutation_allowed(
 ) -> None:
     """Reject mutating capabilities unless ALLOW_MUTATIONS is true.
 
-    Dry-run also blocks mutations. Physical motion is always rejected in
-    milestone 1 regardless of settings.
+    Dry-run also blocks mutations. ``PHYSICAL_MOTION`` is allowed only when
+    mutations are enabled (operator-requested capabilities such as
+    ``seed_runs``); it is never the default path.
     """
-    if risk_level == RiskLevel.PHYSICAL_MOTION:
-        raise MutationDeniedError(
-            f"Capability {capability_name!r} requires physical motion, "
-            "which is out of scope for this harness milestone."
-        )
     if risk_level not in MUTATING_RISKS:
         return
     if settings.dry_run:

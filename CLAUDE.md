@@ -37,7 +37,7 @@ clients/  →  capabilities/  →  scenarios or CLI
 
 1. Add typed async clients in `src/flex_testing_agent/clients/` using `RobotHttpSession`
 2. Compose operations as capabilities with `CapabilityDescriptor` + risk + `ensure_mutation_allowed`
-3. For new GETs, register them in `READONLY_ENDPOINTS` (`clients/readonly.py`)
+3. For HTTP coverage, update `catalog/endpoints.py` (CRS matrix); GETs feed `READONLY_ENDPOINTS`
 4. Wire `FlexRobot` and/or `flex-test` CLI thinly
 5. Add `respx` unit tests; use `@pytest.mark.requires_robot` only for live tests
 

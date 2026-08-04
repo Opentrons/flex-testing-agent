@@ -9,8 +9,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from flex_testing_agent.config.settings import clear_settings_cache, get_settings
+from flex_testing_agent.config.settings import (
+    Settings,
+    clear_settings_cache,
+    get_settings,
+)
 from flex_testing_agent.logging import configure_logging, get_logger
+from flex_testing_agent.orchestration.discover import (
+    RobotDiscoveryError,
+    settings_with_resolved_host,
+)
 from flex_testing_agent.releases.catalog import FlexReleaseCatalog
 from flex_testing_agent.releases.client import fetch_flex_release_summary
 from flex_testing_agent.releases.urls import ReleaseChannel
@@ -30,6 +38,21 @@ app = typer.Typer(
 console = Console()
 log = get_logger(__name__)
 
+
+async def _resolve_settings_for_robot(settings: Settings) -> Settings:
+    """Bind ROBOT_HOST to a live candidate (DHCP-safe)."""
+    try:
+        resolved = await settings_with_resolved_host(settings)
+    except RobotDiscoveryError as exc:
+        raise ValueError(str(exc)) from exc
+    if resolved.robot_host != settings.robot_host:
+        console.print(
+            f"[yellow]ROBOT_HOST updated via discovery:[/yellow] "
+            f"{settings.robot_host or '(unset)'} → {resolved.robot_host}"
+        )
+    return resolved
+
+
 _SCENARIO_OPTION = typer.Option(
     None,
     "--scenario",
@@ -44,6 +67,36 @@ _PICTURE_OPTION = typer.Option(
     None,
     "--picture",
     help="Destination path for the JPEG (default: artifacts/camera/).",
+)
+_PROTOCOL_OPTION = typer.Option(
+    None,
+    "--protocol",
+    help="Protocol file for fixture upload (default: pyro_smoke_no_motion.py).",
+)
+_RUN_STATE_OPTION = typer.Option(
+    None,
+    "--run-state",
+    help=(
+        "Required protocol-run presence: any | no-current | current-idle. "
+        "Defaults differ by command (see docs/crs-testing.md)."
+    ),
+)
+_ENSURE_RUN_STATE_OPTION = typer.Option(
+    False,
+    "--ensure-run-state",
+    help=(
+        "Mutate the robot into --run-state when mismatched "
+        "(requires ALLOW_MUTATIONS=true)."
+    ),
+)
+_SEED_OPTION = typer.Option(
+    None,
+    "--seed",
+    help=(
+        "Seed id to run (repeatable). Default: all. "
+        "Ids: simple_home_move, complex_transfer_dry, heater_shaker_brief, "
+        "cancel_mid_run, camera_and_comments, idle_current."
+    ),
 )
 _INSTALLED_OPTION = typer.Option(
     None,
@@ -127,14 +180,14 @@ def inspect_command(
 
     async def _run() -> int:
         try:
-            settings.require_robot_host()
+            resolved = await _resolve_settings_for_robot(settings)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             return 2
 
         try:
             ctx, snapshot, metadata = await run_inspect_scenario(
-                settings,
+                resolved,
                 scenario_path=scenario,
             )
         except Exception as exc:
@@ -211,11 +264,6 @@ def _run_install(version: str, channel: str | None) -> int:
     if channel is not None and channel not in {"internal", "external"}:
         console.print("[red]--channel must be 'internal' or 'external'[/red]")
         return 2
-    try:
-        settings.require_robot_host()
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        return 2
     if not settings.allow_mutations:
         console.print(
             "[red]ALLOW_MUTATIONS=false. Refusing to install. "
@@ -227,8 +275,13 @@ def _run_install(version: str, channel: str | None) -> int:
 
     async def _run() -> int:
         try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+        try:
             ctx, result = await run_install(
-                settings,
+                resolved,
                 version,
                 channel=channel_enum,
             )
@@ -240,8 +293,8 @@ def _run_install(version: str, channel: str | None) -> int:
         table = Table(title="Flex Install Summary", show_header=False)
         table.add_column("Field", style="cyan")
         table.add_column("Value")
-        table.add_row("Robot name", settings.robot_name)
-        table.add_row("Robot host", settings.robot_host)
+        table.add_row("Robot name", resolved.robot_name)
+        table.add_row("Robot host", resolved.robot_host)
         table.add_row("Requested version", result.requested_version)
         table.add_row("Channel", result.channel.value)
         table.add_row("Previous version", result.previous_system_version or "unknown")
@@ -372,13 +425,13 @@ def module_reconnect_command(
         from flex_testing_agent.robots.flex import FlexRobot
 
         try:
-            settings.require_robot_host()
+            resolved = await _resolve_settings_for_robot(settings)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             return 2
 
         try:
-            async with FlexRobot(settings) as robot:
+            async with FlexRobot(resolved) as robot:
                 result = await run_suite_b_phase(
                     robot,
                     cast(Phase, phase),
@@ -409,6 +462,73 @@ def module_reconnect_command(
     raise SystemExit(asyncio.run(_run()))
 
 
+@app.command("run-state")
+def run_state_command(
+    ensure: str | None = typer.Option(
+        None,
+        "--ensure",
+        help=(
+            "Mutate into this state: no-current | current-idle (needs ALLOW_MUTATIONS)."
+        ),
+    ),
+) -> None:
+    """Show (or ensure) protocol-run presence used by CRS suites."""
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.orchestration.run_state import (
+            DesiredRunState,
+            ensure_run_state,
+            parse_desired_run_state,
+            snapshot_run_state,
+        )
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                if ensure is None:
+                    snap = await snapshot_run_state(robot)
+                else:
+                    desired = parse_desired_run_state(ensure)
+                    if desired is DesiredRunState.ANY:
+                        console.print("[red]--ensure any is a no-op[/red]")
+                        return 2
+                    snap = await ensure_run_state(
+                        robot,
+                        desired,
+                        ensure=True,
+                        capability_name="cli_run_state",
+                    )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        table = Table(title="Protocol run state", show_header=False)
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
+        for label, value in (
+            ("Summary", snap.describe()),
+            ("Has current", snap.has_current),
+            ("Current run id", snap.current_run_id),
+            ("Current status", snap.current_status),
+            ("Run count", snap.run_count),
+            ("links.current", snap.links_current_href),
+        ):
+            table.add_row(label, "n/a" if value is None else str(value))
+        console.print(table)
+        return 0
+
+    raise SystemExit(asyncio.run(_run()))
+
+
 @app.command("probe")
 def probe_command(
     no_picture: bool = typer.Option(
@@ -417,9 +537,12 @@ def probe_command(
         help="Skip camera capture (probe is read-only without a picture).",
     ),
     picture: Path | None = _PICTURE_OPTION,
+    run_state: str | None = _RUN_STATE_OPTION,
+    ensure_run_state: bool = _ENSURE_RUN_STATE_OPTION,
 ) -> None:
     """Exercise catalogued read-only endpoints and optionally take a photo.
 
+    Default run presence: no-current (required for a healthy camera picture).
     Camera capture requires ALLOW_MUTATIONS=true (enables camera if needed).
     """
     clear_settings_cache()
@@ -428,20 +551,36 @@ def probe_command(
 
     async def _run() -> int:
         from flex_testing_agent.capabilities.probe import probe_robot
+        from flex_testing_agent.orchestration.run_state import (
+            DesiredRunState,
+            parse_desired_run_state,
+        )
         from flex_testing_agent.robots.flex import FlexRobot
 
         try:
-            settings.require_robot_host()
+            resolved = await _resolve_settings_for_robot(settings)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             return 2
 
-        async with FlexRobot(settings) as robot:
-            result = await probe_robot(
-                robot,
-                take_picture=not no_picture,
-                picture_path=picture,
-            )
+        desired = (
+            parse_desired_run_state(run_state)
+            if run_state is not None
+            else DesiredRunState.NO_CURRENT
+        )
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await probe_robot(
+                    robot,
+                    take_picture=not no_picture,
+                    picture_path=picture,
+                    run_state=desired,
+                    ensure_run_state_flag=ensure_run_state,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
 
         summary = result.summary
         table = Table(title="KansasFLEX State Summary", show_header=False)
@@ -456,6 +595,7 @@ def probe_command(
             ("API version", summary.api_version),
             ("Update server", summary.update_server_version),
             ("Access control", _compact(summary.access_control)),
+            ("Run state", result.run_state.describe() if result.run_state else None),
             ("E-stop", _compact(summary.estop)),
             ("Door", _compact(summary.door)),
             ("Lights", _compact(summary.lights)),
@@ -490,6 +630,396 @@ def probe_command(
         return 0 if summary.probe_failed == 0 else 1
 
     raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("crs-off-b")
+def crs_off_b_command(
+    create_fixtures: bool = typer.Option(
+        False,
+        "--create-fixtures",
+        help=(
+            "Upload smoke protocol / CSV and create a run when fixtures are "
+            "missing (requires ALLOW_MUTATIONS=true). Also ensures current-idle."
+        ),
+    ),
+    protocol: Path | None = _PROTOCOL_OPTION,
+    run_state: str | None = _RUN_STATE_OPTION,
+    ensure_run_state: bool = _ENSURE_RUN_STATE_OPTION,
+) -> None:
+    """CRS-off Tier B: probe parameterized GET endpoints with fixtures.
+
+    Default run presence: current-idle.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.crs_off import run_crs_off_tier_b
+        from flex_testing_agent.orchestration.run_state import (
+            DesiredRunState,
+            parse_desired_run_state,
+        )
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        desired = (
+            parse_desired_run_state(run_state)
+            if run_state is not None
+            else DesiredRunState.CURRENT_IDLE
+        )
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await run_crs_off_tier_b(
+                    robot,
+                    create_fixtures=create_fixtures,
+                    protocol_path=protocol,
+                    run_state=desired,
+                    ensure_run_state_flag=ensure_run_state,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        table = Table(title="CRS-off Tier B", show_header=False)
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
+        for label, value in (
+            ("Run state", result.run_state.describe() if result.run_state else None),
+            ("Protocol", result.fixtures.get("protocol_id")),
+            ("Analysis", result.fixtures.get("analysis_id")),
+            ("Run", result.fixtures.get("run_id")),
+            ("Data file", result.fixtures.get("data_file_id")),
+            ("Created", result.created_resources or None),
+            ("OK", result.ok_count),
+            ("Failed", result.fail_count),
+            ("Skipped (no fixture)", len(result.skipped_paths)),
+        ):
+            table.add_row(label, "n/a" if value is None else str(value))
+        console.print(table)
+
+        failed = [r for r in result.results if not r.ok]
+        if failed:
+            console.print("[yellow]Failed parameterized GETs:[/yellow]")
+            for item in failed[:30]:
+                console.print(
+                    f"  - {item.path} ({item.status_code}) {item.error or ''}"
+                )
+        if result.skipped_paths:
+            console.print(
+                f"[dim]Skipped {len(result.skipped_paths)} paths "
+                "(missing path params)[/dim]"
+            )
+        return 0 if result.fail_count == 0 else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("crs-off-c")
+def crs_off_c_command(
+    run_state: str | None = _RUN_STATE_OPTION,
+    ensure_run_state: bool = typer.Option(
+        True,
+        "--ensure-run-state/--no-ensure-run-state",
+        help=(
+            "Put the robot in the desired run state before Tier C "
+            "(default: on; needs ALLOW_MUTATIONS)."
+        ),
+    ),
+) -> None:
+    """CRS-off Tier C: reversible mutations (lights + clientData).
+
+    Requires ALLOW_MUTATIONS=true. Default run presence: no-current.
+    Restores light state and deletes the clientData key afterward.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.crs_off import run_crs_off_tier_c
+        from flex_testing_agent.orchestration.run_state import (
+            DesiredRunState,
+            parse_desired_run_state,
+        )
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        desired = (
+            parse_desired_run_state(run_state)
+            if run_state is not None
+            else DesiredRunState.NO_CURRENT
+        )
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await run_crs_off_tier_c(
+                    robot,
+                    run_state=desired,
+                    ensure_run_state_flag=ensure_run_state,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        if result.run_state is not None:
+            console.print(f"[dim]Run state: {result.run_state.describe()}[/dim]")
+        table = Table(title="CRS-off Tier C", show_header=True)
+        table.add_column("Step")
+        table.add_column("OK")
+        table.add_column("Detail")
+        for step in result.steps:
+            table.add_row(
+                step.name,
+                "yes" if step.ok else "no",
+                step.detail or "",
+            )
+        console.print(table)
+        console.print(f"OK={result.ok_count} failed={result.fail_count}")
+        return 0 if result.fail_count == 0 else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("seed-runs")
+def seed_runs_command(
+    seed: list[str] | None = _SEED_OPTION,
+    no_fw_update: bool = typer.Option(
+        False,
+        "--no-fw-update",
+        help="Skip subsystem firmware updates even when fw_update_needed.",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Stop after the first failing seed.",
+    ),
+) -> None:
+    """Build known run history with live dry-deck motion (PHYSICAL_MOTION).
+
+    Requires ALLOW_MUTATIONS=true and an explicit operator request. Deck must
+    be clear except trash A3 and heater-shaker D1. See
+    docs/known-state-and-latency.md.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.seed_runs import (
+            parse_seed_ids,
+            run_seed_runs,
+        )
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+            seed_ids = parse_seed_ids(seed)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await run_seed_runs(
+                    robot,
+                    seed_ids=seed_ids,
+                    update_firmware=not no_fw_update,
+                    strict=strict,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        console.print(f"[dim]Preflight:[/dim] {result.preflight}")
+        table = Table(title="Seed runs")
+        table.add_column("Seed")
+        table.add_column("OK")
+        table.add_column("Status")
+        table.add_column("Run")
+        table.add_column("Detail")
+        for outcome in result.outcomes:
+            table.add_row(
+                outcome.seed_id,
+                "yes" if outcome.ok else "no",
+                outcome.final_status or "",
+                (outcome.run_id or "")[:8],
+                (outcome.detail or outcome.camera_error or "")[:80],
+            )
+        console.print(table)
+        console.print(
+            f"OK={result.ok_count} failed={result.fail_count} "
+            f"timing={result.timing_path}"
+        )
+        return 0 if result.fail_count == 0 else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("reset-data")
+def reset_data_command(
+    deck_configuration: bool = typer.Option(
+        False,
+        "--deck-configuration",
+        help="Also clear deck configuration (usually prefer known-state --deck).",
+    ),
+) -> None:
+    """Clear robot-server data (runs/protocols/offsets via runsHistory).
+
+    Requires ALLOW_MUTATIONS=true. Does not clear SSH authorized keys.
+    See docs/known-state-and-latency.md.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.reset_data import reset_robot_data
+        from flex_testing_agent.clients.settings_reset import (
+            DECK_CONFIGURATION,
+            RUNS_HISTORY,
+        )
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        options = {RUNS_HISTORY}
+        if deck_configuration:
+            options.add(DECK_CONFIGURATION)
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await reset_robot_data(robot, option_ids=options)
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        console.print(f"[green]Reset options:[/green] {result.options}")
+        if result.timing_path:
+            console.print(f"[dim]Timing:[/dim] {result.timing_path}")
+        return 0
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("known-state")
+def known_state_command(
+    reset: bool = typer.Option(
+        True,
+        "--reset/--no-reset",
+        help="Clear robot-server data (runsHistory) before deck setup.",
+    ),
+    deck: bool = typer.Option(
+        True,
+        "--deck/--no-deck",
+        help="Apply KansasFLEX deck config (HS D1, trash A3).",
+    ),
+    hs_serial: str | None = typer.Option(
+        None,
+        "--hs-serial",
+        help="Heater-shaker serial for deck config (default: discover or lab serial).",
+    ),
+) -> None:
+    """Baseline known state: reset data + deck config (no protocol play).
+
+    Requires ALLOW_MUTATIONS=true. Seed runs / LPC / motion are separate
+    (docs/known-state-and-latency.md).
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.known_state import setup_known_state
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        async with FlexRobot(resolved) as robot:
+            try:
+                result = await setup_known_state(
+                    robot,
+                    reset_data=reset,
+                    apply_deck=deck,
+                    heater_shaker_serial=hs_serial,
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/red]")
+                return 2
+
+        table = Table(title="Known state setup", show_header=False)
+        table.add_column("Field", style="cyan")
+        table.add_column("Value")
+        for label, value in (
+            ("Reset", result.reset_options),
+            ("Deck applied", result.deck_applied),
+            ("HS serial", result.heater_shaker_serial),
+            ("Timing", result.timing_path),
+            ("Details", "; ".join(result.details) or None),
+        ):
+            table.add_row(label, "n/a" if value is None else str(value))
+        console.print(table)
+        return 0
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("timing")
+def timing_command(
+    limit: int = typer.Option(10, "--limit", help="Max reports to list."),
+) -> None:
+    """List recent timing JSON reports under ARTIFACT_DIRECTORY/timing/."""
+    clear_settings_cache()
+    settings = get_settings()
+    from flex_testing_agent.orchestration.timing import load_timing_reports
+
+    directory = settings.ensure_artifact_directory() / "timing"
+    reports = load_timing_reports(directory)
+    if not reports:
+        console.print(f"[yellow]No timing reports in {directory}[/yellow]")
+        raise SystemExit(0)
+
+    table = Table(title=f"Timing reports ({directory})")
+    table.add_column("Label")
+    table.add_column("Created")
+    table.add_column("Version")
+    table.add_column("Spans")
+    for report in reports[-limit:]:
+        span_bits = []
+        for span in report.spans[:6]:
+            dur = (
+                f"{span.duration_seconds:.2f}s"
+                if span.duration_seconds is not None
+                else "?"
+            )
+            span_bits.append(f"{span.name}={dur}")
+        table.add_row(
+            report.label,
+            report.created_at,
+            report.system_version or "n/a",
+            ", ".join(span_bits) or "(none)",
+        )
+    console.print(table)
+    raise SystemExit(0)
 
 
 @app.command("version")

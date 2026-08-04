@@ -17,6 +17,7 @@ from flex_testing_agent.models.build import InstallResult
 from flex_testing_agent.models.health import HealthReport
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
+from flex_testing_agent.orchestration.timing import TimingSession
 from flex_testing_agent.releases.resolve import resolve_build
 from flex_testing_agent.releases.urls import ReleaseChannel
 from flex_testing_agent.releases.versions import normalize_robot_version
@@ -40,6 +41,7 @@ INSTALL_DESCRIPTOR = CapabilityDescriptor(
         "update_begin.json",
         "update_status_final.json",
         "post_install_health.json",
+        "timing",
     ],
     preconditions=[
         "ALLOW_MUTATIONS=true",
@@ -73,14 +75,24 @@ async def install_build(
         capability_name=INSTALL_DESCRIPTOR.name,
     )
     settings.require_robot_host()
+    timing = TimingSession(
+        label=f"install-{normalize_robot_version(version) or version}",
+        robot_host=settings.robot_host,
+        channel=channel.value if channel is not None else None,
+    )
 
     build = await resolve_build(
         version,
         channel=channel,
         timeout_seconds=settings.robot_request_timeout_seconds,
     )
+    timing.channel = build.channel.value
     previous = await _safe_system_version(robot)
     if _versions_match(previous, build.version):
+        timing.note("already on requested version; skipped download/flash")
+        timing.system_version = previous
+        path = timing.write(settings.ensure_artifact_directory() / "timing")
+        robot.raw_evidence["timing_path"] = str(path)
         return InstallResult(
             requested_version=build.version,
             channel=build.channel,
@@ -88,6 +100,7 @@ async def install_build(
             resulting_system_version=previous,
             succeeded=True,
             detail="Robot already reports the requested system version.",
+            evidence_names=list(robot.raw_evidence.keys()),
         )
 
     dl_dir = download_directory or (settings.ensure_artifact_directory() / "downloads")
@@ -98,22 +111,25 @@ async def install_build(
         url=build.system_url,
         destination=str(zip_path),
     )
-    await download_file(
-        build.system_url,
-        zip_path,
-        timeout_seconds=max(600.0, write_timeout_seconds),
-    )
+    async with timing.aspan("install.download", meta={"url": build.system_url}):
+        await download_file(
+            build.system_url,
+            zip_path,
+            timeout_seconds=max(600.0, write_timeout_seconds),
+        )
 
     update = robot.update
     with contextlib.suppress(RobotApiError):
         await update.cancel(timeout=settings.robot_request_timeout_seconds)
 
+    timing.start("install.upload_and_flash")
     begin = await update.begin(
         auto_commit_and_restart=auto_commit_and_restart,
         timeout=settings.robot_request_timeout_seconds,
     )
     token = str(begin.get("token", ""))
     if not token:
+        timing.fail("install.upload_and_flash", "update begin missing token")
         raise RobotApiError(
             "update begin response missing token",
             path="/server/update/begin",
@@ -148,6 +164,9 @@ async def install_build(
     robot.raw_evidence["update_status_final"] = final_status
     stage = str(final_status.get("stage", ""))
     if stage in _TERMINAL_BAD:
+        timing.fail("install.upload_and_flash", f"Update failed: {final_status}")
+        path = timing.write(settings.ensure_artifact_directory() / "timing")
+        robot.raw_evidence["timing_path"] = str(path)
         return InstallResult(
             requested_version=build.version,
             channel=build.channel,
@@ -157,8 +176,11 @@ async def install_build(
             auto_commit_and_restart=effective_auto,
             succeeded=False,
             detail=f"Update failed: {final_status}",
+            evidence_names=list(robot.raw_evidence.keys()),
         )
+    timing.stop("install.upload_and_flash", detail=f"stage={stage}")
 
+    timing.start("boot.health")
     if not effective_auto:
         if stage == "done":
             commit_status = await update.commit(
@@ -172,11 +194,20 @@ async def install_build(
         expected_version=build.version,
         timeout_seconds=reboot_timeout_seconds,
         poll_interval_seconds=5.0,
+        timing=timing,
     )
     robot.raw_evidence["post_install_health"] = resulting["health_raw"]
     resulting_version = resulting["system_version"]
+    timing.system_version = resulting_version
+    timing.api_version = (
+        str(resulting["api_version"]) if resulting.get("api_version") else None
+    )
+    if timing.is_open("boot.health"):
+        timing.stop("boot.health", detail="first /health 200 after reboot")
 
     matched = _versions_match(resulting_version, build.version)
+    path = timing.write(settings.ensure_artifact_directory() / "timing")
+    robot.raw_evidence["timing_path"] = str(path)
     return InstallResult(
         requested_version=build.version,
         channel=build.channel,
@@ -243,18 +274,68 @@ async def _wait_for_reboot_and_version(
     expected_version: str,
     timeout_seconds: float,
     poll_interval_seconds: float,
+    timing: TimingSession | None = None,
 ) -> dict[str, Any]:
-    """Wait for the robot to become healthy after restart."""
+    """Wait for post-reboot OS version, then robot-server ``/health``.
+
+    Update-server ``/server/update/health`` often reports the new version while
+    robot-server ``/health`` is still 500 (DB busy / Pyro attach / firmware
+    flash; see RQA-5787). Treat matching update-server version as OS install
+    success for ``boot.health``, then keep waiting for ``/health`` 200.
+    """
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     # Give the robot a moment to drop offline after restart is triggered.
     await asyncio.sleep(15.0)
     last_error = "not reached"
+    os_seen: dict[str, Any] | None = None
     while asyncio.get_running_loop().time() < deadline:
         try:
             async with FlexRobot(settings) as probe:
-                raw = await probe.health.get_health_raw(
-                    timeout=settings.robot_health_timeout_seconds
-                )
+                # Prefer update-server: stays up while robot-server is unhealthy.
+                try:
+                    update_raw = await probe.update_health.get_update_health_raw(
+                        timeout=settings.robot_health_timeout_seconds
+                    )
+                    update_version = str(update_raw.get("systemVersion") or "")
+                    if os_seen is None and _versions_match(
+                        update_version, expected_version
+                    ):
+                        log.info(
+                            "post_reboot_os_version",
+                            system_version=update_version,
+                            api_version=update_raw.get("apiServerVersion"),
+                            source="update_health",
+                            at=datetime.now(UTC).isoformat(),
+                        )
+                        os_seen = {
+                            "system_version": update_version,
+                            "api_version": update_raw.get("apiServerVersion"),
+                            "update_health_raw": update_raw,
+                            "expected_version": expected_version,
+                            "source": "update_health",
+                        }
+                        if timing is not None and timing.is_open("boot.health"):
+                            timing.stop(
+                                "boot.health",
+                                detail=(
+                                    "update-server reports expected version "
+                                    "(robot-server /health may still be down)"
+                                ),
+                            )
+                except Exception as exc:
+                    last_error = f"update_health: {exc}"
+                    log.info("waiting_for_robot", error=last_error)
+
+                try:
+                    raw = await probe.health.get_health_raw(
+                        timeout=settings.robot_health_timeout_seconds
+                    )
+                except RobotApiError as exc:
+                    last_error = str(exc)
+                    log.info("waiting_for_robot", error=last_error)
+                    await asyncio.sleep(poll_interval_seconds)
+                    continue
+
                 health = HealthReport.model_validate(raw)
                 system_version = health.system_version
                 log.info(
@@ -263,16 +344,44 @@ async def _wait_for_reboot_and_version(
                     api_version=health.api_version,
                     at=datetime.now(UTC).isoformat(),
                 )
+                if timing is not None and timing.is_open("boot.health"):
+                    timing.stop("boot.health", detail="first /health 200 after reboot")
+                if timing is not None:
+                    async with timing.aspan("boot.instruments"):
+                        await probe.session.get_json("/instruments")
+                    async with timing.aspan("boot.modules"):
+                        await probe.session.get_json("/modules")
                 return {
                     "system_version": system_version,
                     "api_version": health.api_version,
                     "health_raw": raw,
                     "expected_version": expected_version,
+                    "source": "health",
+                    "update_health_raw": (os_seen or {}).get("update_health_raw"),
                 }
         except Exception as exc:
             last_error = str(exc)
             log.info("waiting_for_robot", error=last_error)
             await asyncio.sleep(poll_interval_seconds)
+
+    # OS may be installed even if robot-server never recovered (RQA-5787).
+    if os_seen is not None:
+        if timing is not None and timing.is_open("boot.health"):
+            timing.stop(
+                "boot.health",
+                detail="update-server version matched; /health never recovered",
+            )
+        os_seen["health_raw"] = {"error": last_error}
+        os_seen["robot_server_healthy"] = False
+        log.info(
+            "post_reboot_os_only",
+            system_version=os_seen.get("system_version"),
+            last_error=last_error,
+        )
+        return os_seen
+
+    if timing is not None and timing.is_open("boot.health"):
+        timing.fail("boot.health", f"Timed out waiting for reboot ({last_error})")
     raise RobotApiError(
         f"Timed out waiting for robot reboot ({last_error})",
         path="/health",
@@ -284,6 +393,9 @@ async def _safe_system_version(robot: FlexRobot) -> str | None:
         health = await robot.verify_health()
         return health.system_version
     except RobotApiError:
+        with contextlib.suppress(Exception):
+            update = await robot.update_health.get_update_health()
+            return update.system_version
         return None
 
 

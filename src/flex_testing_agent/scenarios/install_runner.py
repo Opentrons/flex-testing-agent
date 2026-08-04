@@ -33,7 +33,11 @@ async def run_install(
     evidence_dir.mkdir(parents=True, exist_ok=True)
     ctx.evidence_directory = evidence_dir
     evidence = EvidenceStore(evidence_dir)
+    from flex_testing_agent.orchestration.discover import settings_with_resolved_host
+
+    settings = await settings_with_resolved_host(settings)
     host = settings.require_robot_host()
+    ctx.settings = settings
     ctx.mark_running()
 
     try:

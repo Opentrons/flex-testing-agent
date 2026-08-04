@@ -13,6 +13,11 @@ from flex_testing_agent.clients.readonly import ReadonlyClient, ReadonlyProbeRep
 from flex_testing_agent.logging import get_logger
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
+from flex_testing_agent.orchestration.run_state import (
+    DesiredRunState,
+    RunStateSnapshot,
+    ensure_run_state,
+)
 from flex_testing_agent.robots.flex import FlexRobot
 
 log = get_logger(__name__)
@@ -20,11 +25,13 @@ log = get_logger(__name__)
 PROBE_DESCRIPTOR = CapabilityDescriptor(
     name="probe_readonly",
     description=(
-        "Exercise catalogued read-only Flex HTTP endpoints and summarize state."
+        "Exercise catalogued read-only Flex HTTP endpoints and summarize state. "
+        "Default run presence: no current protocol run (camera / Tier A baseline)."
     ),
     risk_level=RiskLevel.READ_ONLY,
     mutates_robot=False,
     evidence_produced=["readonly_probe.json", "robot_state_summary.json"],
+    preconditions=["Desired run state: no-current (verify or --ensure-run-state)"],
 )
 
 PICTURE_DESCRIPTOR = CapabilityDescriptor(
@@ -72,6 +79,7 @@ class ProbeResult(BaseModel):
 
     summary: RobotStateSummary
     probe: dict[str, Any]
+    run_state: RunStateSnapshot | None = None
     picture_path: str | None = None
     picture_error: str | None = None
 
@@ -138,8 +146,20 @@ async def probe_robot(
     take_picture: bool = True,
     picture_path: Path | None = None,
     enable_camera_if_needed: bool = True,
+    run_state: DesiredRunState = DesiredRunState.NO_CURRENT,
+    ensure_run_state_flag: bool = False,
 ) -> ProbeResult:
-    """Probe read-only endpoints and optionally capture a camera image."""
+    """Probe read-only endpoints and optionally capture a camera image.
+
+    Verifies (or ensures) protocol-run presence before probing. Tier A baseline
+    and successful ``POST /camera/picture`` require ``no-current``.
+    """
+    snap = await ensure_run_state(
+        robot,
+        run_state,
+        ensure=ensure_run_state_flag,
+        capability_name="probe_run_state",
+    )
     readonly = ReadonlyClient(robot.session)
     report = await readonly.probe_all()
     robot.raw_evidence["readonly_probe"] = {
@@ -206,6 +226,7 @@ async def probe_robot(
     return ProbeResult(
         summary=summary,
         probe=robot.raw_evidence["readonly_probe"],
+        run_state=snap,
         picture_path=str(picture_dest) if picture_dest else None,
         picture_error=picture_error,
     )

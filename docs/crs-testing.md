@@ -1,0 +1,178 @@
+# CRS (Compliance Ready Software) testing
+
+CRS is the product name for what the robot API still calls **access control**
+(`accessControlEnabled`). Formerly ACM / RCS in some docs.
+
+Primary product docs:
+
+- [Approved PRD - Compliance Readiness Software V2](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5339512880)
+- [Access Control Mode Overview (PER)](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5433393193)
+- [QA Test Checklist for RCS (formerly ACM)](https://opentrons.atlassian.net/wiki/spaces/~712020ac583a1878a5430aaf1db6793f399ca1/pages/6195970453)
+- Exit / restore: [EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176) (serial / assisted wipe)
+
+This harness treats CRS as a **dual-mode** problem:
+
+1. **CRS off** (default for KansasFLEX lab work): unauthenticated HTTP works; build a
+   complete endpoint exercise suite here first.
+2. **CRS on** (later): same catalog, plus OAuth login, roles/scopes, and expected
+   401/403 matrix. Enablement stays **blocked** in the harness until a restore path
+   is documented and rehearsed.
+
+## Goal
+
+When CRS is off, the client catalog and suite can exercise **every** Flex HTTP
+endpoint the monorepo exposes (robot-server, auth-server, update-server,
+system-server, audit-server), with risk gates. When CRS is on later, the same
+catalog drives an authorization matrix without inventing ad-hoc URLs.
+
+## Architecture
+
+```text
+docs/crs-testing.md          design SSOT
+catalog/endpoints.py         method × path inventory + risk + scopes
+clients/*                    typed HTTP wrappers (reuse RobotHttpSession)
+capabilities/probe.py        CRS-off Tier A (parameter-free GETs)
+capabilities/crs_off.py      CRS-off Tier B / Tier C
+flex-test probe|crs-off-b|crs-off-c|inspect
+```
+
+### Endpoint catalog
+
+`src/flex_testing_agent/catalog/endpoints.py` is the inventory:
+
+| Field | Purpose |
+|-------|---------|
+| `method` / `path` / `service` | Identity |
+| `group` | Summary bucketing |
+| `risk_level` | Gate for live calls |
+| `required_scopes` | CRS-on expectations (from `require_scopes`) |
+| `parameterized` | Needs fixture IDs before live call |
+| `blocked` | Never call (`PATCH .../accessControlEnabled`) |
+| `crs_off_acceptable_status` | Soft failures when probing CRS-off |
+
+Regenerate from a local monorepo clone:
+
+```bash
+uv run python scripts/generate_endpoint_catalog.py
+```
+
+Approximate surface (regenerate to refresh counts): ~180 unique routes,
+~50 parameter-free GETs for the unauthenticated CRS-off probe.
+
+### Layering for clients
+
+Prefer domain clients over a single mega-client:
+
+| Domain | Client | Notes |
+|--------|--------|-------|
+| Health / update health | exists | |
+| Auth settings detect | exists | GET only; never enable |
+| Camera | exists | |
+| Modules | exists | |
+| Readonly / probe | exists | Driven by catalog GETs |
+| Protocols / runs / data files | exists | Tier B fixtures + upload |
+| Client data / robot lights | exists | Tier C reversible mutations |
+| OAuth token | next (CRS-on) | `POST /oauth2/token` |
+| Users | next (CRS-on) | `/auth/users/*` |
+| Audit | next | `/audit/*` |
+
+## Run state matrix (required preflight)
+
+Protocol-run **presence** changes HTTP behavior (camera, some run GETs, Pyro
+`ot-protocol` process). Suites must **declare**, **verify**, and optionally
+**ensure** run state before exercising endpoints. Do not assume leftover robot
+state from a prior session.
+
+| Desired state | Meaning | Why it matters |
+|---------------|---------|----------------|
+| `no-current` | No run with `current=true` | Baseline GETs; `POST /camera/picture` and preview succeed ([RQA-5807](https://opentrons.atlassian.net/browse/RQA-5807) clarity when current) |
+| `current-idle` | One current run, `status=idle` (created, not played) | Parameterized `/runs/{id}/…` GETs; preview correctly returns 422 “run is active” |
+| `any` | Snapshot only | Inspect / operator debug |
+
+Orchestration: `orchestration/run_state.py` (`snapshot_run_state`,
+`ensure_run_state`). CLI:
+
+```bash
+uv run flex-test run-state
+ALLOW_MUTATIONS=true uv run flex-test run-state --ensure no-current
+ALLOW_MUTATIONS=true uv run flex-test run-state --ensure current-idle
+```
+
+Suite commands accept `--run-state` and `--ensure-run-state` (mutations gated).
+Without `--ensure-run-state`, a mismatch fails fast with the observed state.
+
+| Suite / group | Default desired state | Ensure behavior |
+|---------------|----------------------|-----------------|
+| Tier A `probe` (+ camera picture) | `no-current` | Off unless `--ensure-run-state` |
+| Tier B `crs-off-b` | `current-idle` | On with `--create-fixtures` or `--ensure-run-state` |
+| Tier C `crs-off-c` | `no-current` | On by default (`--no-ensure-run-state` to skip) |
+
+Future groups (same machinery): `current-running` / post-play `succeeded` only
+with explicit operator request (physical motion / play gates).
+
+## CRS-off suite tiers
+
+Run only against a robot with `accessControlEnabled: false` (confirm via
+`flex-test inspect`). Confirm run presence via `flex-test run-state` or the
+suite preflight.
+
+| Tier | What | Gate / CLI | Default run state |
+|------|------|------------|-------------------|
+| **A** | All parameter-free GETs (+ known soft statuses) | `flex-test probe` | `no-current` |
+| **B** | Parameterized GETs using protocol/run/data-file fixtures | `flex-test crs-off-b` (`--create-fixtures` needs `ALLOW_MUTATIONS`) | `current-idle` |
+| **C** | Reversible mutations (lights toggle+restore, clientData put/get/delete) | `ALLOW_MUTATIONS`; `flex-test crs-off-c` | `no-current` |
+| **D** | Disruptive / install / destructive | Explicit capability + mutations | declare per capability |
+| **E** | Physical motion (home, move, run play) | Explicit operator request only | declare per scenario |
+| **Blocked** | `PATCH /auth/settings/accessControlEnabled` | Always refused | n/a |
+
+Tier B uses existing robot resources when present. Pass `--create-fixtures` to
+upload `docs/test-suggestions/protocols/pyro_smoke_no_motion.py`, a tiny CSV,
+and ensure a **current idle** run when fixtures / run state are missing.
+
+## CRS-on suite (deferred)
+
+Prerequisites:
+
+1. Documented restore (lab SSH / serial wipe per EXEC-2176 / service procedure).
+2. Dedicated robot or accepted lockout risk (not casually KansasFLEX).
+3. OAuth client + role fixtures (Admin / User / Auditor / Service).
+
+Then for each catalog entry:
+
+- unauthenticated → expect 401/403 (except truly public routes)
+- token without required scope → 403
+- token with required scope → success (or resource-specific 404)
+
+Still never implement a harness “enable CRS” happy path without restore.
+
+## Safety
+
+Unchanged from [safety-model.md](safety-model.md):
+
+- Mutations default off
+- Never enable CRS via API from this harness
+- No first-class physical-motion CLI; live play only on explicit request
+- Timeouts on all HTTP; redact secrets in evidence
+- Re-check `ROBOT_HOST` (DHCP)
+
+## Workstreams
+
+1. **Catalog + Tier A**: done (`flex-test probe`).
+2. **Domain clients + Tier B/C**: done (`protocols` / `runs` / `data_files` /
+   `client_data` / `robot_control`; `flex-test crs-off-b|crs-off-c`).
+3. **Run-state preflight**: done for Tier A/B/C (`flex-test run-state`,
+   `--run-state` / `--ensure-run-state`). Expand matrix for played / succeeded
+   groups when Tier E scenarios land.
+4. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
+5. **OAuth + users clients**: prepare dual-mode session (no enable).
+6. **CRS-on authorization matrix**: after restore path; map to QA checklist sections
+   (login, roles, settings, logs).
+7. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
+
+## Related harness docs
+
+- [architecture.md](architecture.md) (dual-mode AC note)
+- [safety-model.md](safety-model.md)
+- [source-research.md](source-research.md)
+- [development-plan.md](development-plan.md)
+- [pyro-testing.md](pyro-testing.md) (orthogonal; robot may be unhealthy while this lands)

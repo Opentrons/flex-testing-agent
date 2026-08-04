@@ -1,7 +1,7 @@
 """Read-only Flex API endpoint catalog and probe helper.
 
-Paths are derived from Opentrons ``robot-server``, ``update-server``, and
-``auth-server`` routers. This client only issues GET requests.
+GET coverage is driven by ``catalog.endpoints_for_crs_off_get_probe`` (full Flex
+HTTP inventory for CRS-off Tier A). This client only issues GET requests.
 """
 
 from __future__ import annotations
@@ -9,8 +9,56 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from flex_testing_agent.catalog import EndpointSpec, endpoints_for_crs_off_get_probe
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.session import RobotHttpSession
+
+# Stable probe names used by summarize_probe / evidence keys (path → name).
+_PROBE_NAME_BY_PATH: dict[str, str] = {
+    "/health": "health",
+    "/server/update/health": "update_health",
+    "/server/name": "server_name",
+    "/server/ssh_keys": "ssh_keys",
+    "/system/time": "system_time",
+    "/auth/settings/accessControlEnabled": "access_control_enabled",
+    "/auth/settings": "auth_settings",
+    "/robot/control/estopStatus": "estop_status",
+    "/robot/door/status": "door_status",
+    "/robot/lights": "lights",
+    "/motors/engaged": "motors_engaged",
+    "/subsystems/status": "subsystems_status",
+    "/subsystems/updates/current": "subsystems_updates_current",
+    "/subsystems/updates/all": "subsystems_updates_all",
+    "/instruments": "instruments",
+    "/modules": "modules",
+    "/pipettes": "pipettes",
+    "/runs": "runs",
+    "/protocols": "protocols",
+    "/protocols/ids": "protocol_ids",
+    "/maintenance_runs/current_run": "maintenance_current_run",
+    "/commands": "commands",
+    "/sessions": "sessions",
+    "/dataFiles": "data_files",
+    "/settings": "settings",
+    "/settings/robot": "settings_robot",
+    "/settings/reset/options": "settings_reset_options",
+    "/accessControl/settings": "access_control_settings",
+    "/errorRecovery/settings": "error_recovery_settings",
+    "/calibration/status": "calibration_status",
+    "/calibration/pipette_offset": "pipette_offset",
+    "/calibration/tip_length": "tip_length",
+    "/labware/calibrations": "labware_calibrations",
+    "/labwareOffsets": "labware_offsets",
+    "/deck_configuration": "deck_configuration",
+    "/networking/status": "networking_status",
+    "/wifi/keys": "wifi_keys",
+    "/wifi/eap-options": "wifi_eap_options",
+    "/wifi/list": "wifi_list",
+    "/camera": "camera",
+    "/camera/stream": "camera_stream",
+    "/camera/stream/settings": "camera_stream_settings",
+    "/camera/cameraSettings/ot_system_camera": "camera_capture_settings",
+}
 
 
 @dataclass(frozen=True)
@@ -26,123 +74,39 @@ class ReadonlyEndpoint:
     acceptable_status: tuple[int, ...] = (200,)
 
 
-# Core Flex read-only surface used for state summaries.
+def _probe_name(path: str, catalog_name: str) -> str:
+    if path in _PROBE_NAME_BY_PATH:
+        return _PROBE_NAME_BY_PATH[path]
+    if catalog_name.startswith("get_"):
+        return catalog_name.removeprefix("get_")
+    return catalog_name
+
+
+def _from_spec(spec: EndpointSpec) -> ReadonlyEndpoint:
+    return ReadonlyEndpoint(
+        name=_probe_name(spec.path, spec.name),
+        path=spec.path,
+        group=spec.group,
+        timeout_seconds=spec.timeout_seconds,
+        notes=spec.notes,
+        acceptable_status=spec.crs_off_acceptable_status,
+    )
+
+
+# Concrete parameterized GETs that CRS-off Tier A still exercises with known IDs.
+_EXTRA_READONLY_ENDPOINTS: tuple[ReadonlyEndpoint, ...] = (
+    ReadonlyEndpoint(
+        name="camera_capture_settings",
+        path="/camera/cameraSettings/ot_system_camera",
+        group="camera",
+    ),
+)
+
+
+# Core Flex read-only surface used for CRS-off state summaries / probe.
 READONLY_ENDPOINTS: tuple[ReadonlyEndpoint, ...] = (
-    ReadonlyEndpoint("health", "/health", "system"),
-    ReadonlyEndpoint("update_health", "/server/update/health", "system"),
-    ReadonlyEndpoint("server_name", "/server/name", "system"),
-    ReadonlyEndpoint(
-        "ssh_keys",
-        "/server/ssh_keys",
-        "system",
-        notes="Often 403 without elevated credentials.",
-        acceptable_status=(200, 403),
-    ),
-    ReadonlyEndpoint("system_time", "/system/time", "system"),
-    ReadonlyEndpoint(
-        "access_control_enabled",
-        "/auth/settings/accessControlEnabled",
-        "auth",
-    ),
-    ReadonlyEndpoint("auth_settings", "/auth/settings", "auth"),
-    ReadonlyEndpoint("estop_status", "/robot/control/estopStatus", "robot"),
-    ReadonlyEndpoint("door_status", "/robot/door/status", "robot"),
-    ReadonlyEndpoint("lights", "/robot/lights", "robot"),
-    ReadonlyEndpoint(
-        "motors_engaged",
-        "/motors/engaged",
-        "robot",
-        notes="Flex often returns 500; treat as known soft failure.",
-        acceptable_status=(200, 500),
-    ),
-    ReadonlyEndpoint("subsystems_status", "/subsystems/status", "robot"),
-    ReadonlyEndpoint(
-        "subsystems_updates_current",
-        "/subsystems/updates/current",
-        "robot",
-    ),
-    ReadonlyEndpoint(
-        "subsystems_updates_all",
-        "/subsystems/updates/all",
-        "robot",
-    ),
-    ReadonlyEndpoint("instruments", "/instruments", "hardware"),
-    ReadonlyEndpoint("modules", "/modules", "hardware"),
-    ReadonlyEndpoint("pipettes", "/pipettes", "hardware"),
-    ReadonlyEndpoint("runs", "/runs", "protocols"),
-    ReadonlyEndpoint("protocols", "/protocols", "protocols"),
-    ReadonlyEndpoint("protocol_ids", "/protocols/ids", "protocols"),
-    ReadonlyEndpoint(
-        "maintenance_current_run",
-        "/maintenance_runs/current_run",
-        "protocols",
-        notes="404 when no maintenance run is active.",
-        acceptable_status=(200, 404),
-    ),
-    ReadonlyEndpoint("commands", "/commands", "protocols"),
-    ReadonlyEndpoint("sessions", "/sessions", "protocols"),
-    ReadonlyEndpoint("data_files", "/dataFiles", "protocols"),
-    ReadonlyEndpoint("settings", "/settings", "settings"),
-    ReadonlyEndpoint("settings_robot", "/settings/robot", "settings"),
-    ReadonlyEndpoint(
-        "settings_reset_options",
-        "/settings/reset/options",
-        "settings",
-    ),
-    ReadonlyEndpoint(
-        "access_control_settings",
-        "/accessControl/settings",
-        "settings",
-    ),
-    ReadonlyEndpoint(
-        "error_recovery_settings",
-        "/errorRecovery/settings",
-        "settings",
-    ),
-    ReadonlyEndpoint("calibration_status", "/calibration/status", "calibration"),
-    ReadonlyEndpoint(
-        "pipette_offset",
-        "/calibration/pipette_offset",
-        "calibration",
-        notes="Legacy OT-2 path; Flex often returns 403.",
-        acceptable_status=(200, 403),
-    ),
-    ReadonlyEndpoint(
-        "tip_length",
-        "/calibration/tip_length",
-        "calibration",
-        notes="Legacy OT-2 path; Flex often returns 403.",
-        acceptable_status=(200, 403),
-    ),
-    ReadonlyEndpoint(
-        "labware_calibrations",
-        "/labware/calibrations",
-        "calibration",
-    ),
-    ReadonlyEndpoint("labware_offsets", "/labwareOffsets", "calibration"),
-    ReadonlyEndpoint("deck_configuration", "/deck_configuration", "calibration"),
-    ReadonlyEndpoint("networking_status", "/networking/status", "network"),
-    ReadonlyEndpoint("wifi_keys", "/wifi/keys", "network"),
-    ReadonlyEndpoint("wifi_eap_options", "/wifi/eap-options", "network"),
-    ReadonlyEndpoint(
-        "wifi_list",
-        "/wifi/list",
-        "network",
-        timeout_seconds=60.0,
-        notes="Wi-Fi scan; may be slow.",
-    ),
-    ReadonlyEndpoint("camera", "/camera", "camera"),
-    ReadonlyEndpoint("camera_stream", "/camera/stream", "camera"),
-    ReadonlyEndpoint(
-        "camera_stream_settings",
-        "/camera/stream/settings",
-        "camera",
-    ),
-    ReadonlyEndpoint(
-        "camera_capture_settings",
-        "/camera/cameraSettings/ot_system_camera",
-        "camera",
-    ),
+    tuple(_from_spec(spec) for spec in endpoints_for_crs_off_get_probe())
+    + _EXTRA_READONLY_ENDPOINTS
 )
 
 

@@ -243,7 +243,11 @@ Prefer `return_tip` / tiprack return when no trash bin is loaded.
 
 ## Post-install recovery cheat sheet
 
-If `/health` is 502 but update-server shows the new version:
+If `/health` is 502/500 but update-server shows the new version:
+
+`flex-test put` treats matching `GET /server/update/health` `systemVersion` as
+OS install success (`boot.health`) even while robot-server `/health` is still
+failing (common: `DatabaseFailedToInitialize` / device busy during FW flash).
 
 1. SSH: confirm nameserver + hardware-api + robot-server active.
 2. Confirm `OT3API` in NS; watch hardware-api for firmware `Update: … %`.
@@ -257,6 +261,7 @@ If `/health` is 502 but update-server shows the new version:
 | Key | Summary |
 |-----|---------|
 | [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787) | robot-server startup / nginx 502 after update during HW firmware flash |
+| [RQA-5808](https://opentrons.atlassian.net/browse/RQA-5808) | `/health` 500 `DatabaseFailedToInitialize` (Errno 16 EBUSY on robot-server DB dir) after 9.1.2→alpha.10; HW endpoints still 200 |
 | [RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788) | `unhashable type: 'dict'` on subsystem updates via OT3API proxy |
 | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register |
 | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart |

@@ -32,7 +32,7 @@ async def test_health_client(
         return_value=httpx.Response(200, json=sample_health_payload)
     )
     report = await HealthClient(session).get_health()
-    assert report.name == "Kansas"
+    assert report.name == "KansasFLEX"
     assert report.system_version == "2026.1.0"
 
 

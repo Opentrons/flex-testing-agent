@@ -79,7 +79,8 @@ See [.env.example](.env.example). Important keys:
 
 | Variable | Purpose |
 |----------|---------|
-| `ROBOT_HOST` | Flex IP or hostname |
+| `ROBOT_HOST` | Preferred Flex IP or hostname |
+| `ROBOT_HOST_CANDIDATES` | Comma-separated fallbacks (default `192.168.0.21,192.168.0.20`) |
 | `ROBOT_NAME` | Display name (default `Kansas`) |
 | `OPENTRONS_REPO_PATH` | Local Opentrons monorepo path |
 | `ROBOT_STACK_REPO_PATH` | Local robot-stack clone (release docs) |

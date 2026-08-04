@@ -46,13 +46,23 @@ def test_mutating_blocked_by_dry_run() -> None:
 
 
 @pytest.mark.unit
-def test_physical_motion_always_blocked() -> None:
+def test_physical_motion_allowed_with_mutations() -> None:
     settings = Settings(allow_mutations=True, dry_run=False)
-    with pytest.raises(MutationDeniedError, match="physical motion"):
+    ensure_mutation_allowed(
+        settings,
+        risk_level=RiskLevel.PHYSICAL_MOTION,
+        capability_name="seed_runs",
+    )
+
+
+@pytest.mark.unit
+def test_physical_motion_blocked_without_mutations() -> None:
+    settings = Settings(allow_mutations=False, dry_run=False)
+    with pytest.raises(MutationDeniedError, match="ALLOW_MUTATIONS"):
         ensure_mutation_allowed(
             settings,
             risk_level=RiskLevel.PHYSICAL_MOTION,
-            capability_name="move_gantry",
+            capability_name="seed_runs",
         )
 
 

@@ -25,30 +25,54 @@ Small, reviewable pull requests. Each PR should be independently understandable.
 7. **Flex release catalog (robot-stack)**  
    `flex-test releases`, internal/external latest lanes, version docs.
 
-8. **Access-control dual-mode hardening**  
-   Optional token attachment, clearer AC-on failure modes, still **no enable**.
+8. **CRS / access-control dual-mode hardening**  
+   Optional token attachment, clearer CRS-on failure modes, still **no enable**.
+   See [crs-testing.md](crs-testing.md).
 
-9. **Lockdown / mode smoke (deferred)**  
-   Blocked until a safe reversible mode API or restore story exists. Do not enable AC in the harness.
+9. **Full HTTP endpoint catalog + CRS-off Tier A**  
+   Monorepo-derived `catalog/endpoints.py` (~all methods/paths); CRS-off GET probe
+   driven by that catalog (`flex-test probe`).
 
-10. **User and role research**  
-    Document `/auth/users` and scopes from Opentrons source.
+10. **Domain clients for CRS-off Tier B/C**  
+    Protocols, runs, data files, clientData, lights; parameterized GET fixtures.
+    (`flex-test crs-off-b`)
 
-11. **Authorization matrix**  
-    Deterministic permission probes with AC-on, after restore path is defined.
+10a. **Run-state preflight for suites**  
+    Snapshot / verify / ensure `no-current` vs `current-idle` before Tier A/B/C
+    (`orchestration/run_state.py`, `flex-test run-state`). Matrix in
+    [crs-testing.md](crs-testing.md).
 
-12. **Build install capability**  
+10b. **Known-state setup + latency**  
+    Clear robot-server data, apply Kansas deck, record install/boot/play timings
+    for Pyro vs non-Pyro compare. Design: [known-state-and-latency.md](known-state-and-latency.md).
+    CLI: `reset-data`, `known-state`, `timing`. Seed-run motion history next.
+
+11. **CRS-off mutating suite**  
+    Gated Tier C (`flex-test crs-off-c`); Tier D still mostly install/explicit.
+
+12. **User / OAuth clients (CRS-on prep)**  
+    Document and implement `/auth/users`, `POST /oauth2/token`, scopes from
+    `server_utils.auth.scopes`.
+
+13. **CRS-on authorization matrix (deferred)**  
+    Deterministic permission probes with CRS on, after restore path
+    ([EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176)).
+
+14. **Build install capability**  
     Select a published robot OS build and install/verify on Kansas (uses release catalog).
+    (Already largely landed via `flex-test put`.)
 
-13. **Agent capability descriptors**  
+15. **Agent capability descriptors**  
     Expand allowlist metadata and validation.
 
-14. **Bounded agent runtime**  
+16. **Bounded agent runtime**  
     Optional adapter; harness remains core.
 
-15. **Local web application**  
+17. **Local web application**  
     Display runs, snapshots, evidence, findings.
 
 ## Milestone 1 status
 
-Items 1–7 are implemented in the initial foundation (including release discovery). Next PR should focus on item 8 without enabling access control.
+Items 1–7 and install/release tooling are in place. Item 9 (endpoint catalog +
+CRS-off GET Tier A) is the current CRS focus. Item 8/10–13 remain; do not enable
+CRS from the harness.

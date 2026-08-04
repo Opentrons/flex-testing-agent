@@ -95,6 +95,108 @@ class RobotHttpSession:
             expected_status=expected_status,
         )
 
+    async def put_json(
+        self,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> dict[str, Any]:
+        """PUT JSON and return a JSON object response."""
+        return await self._request_json(
+            "PUT",
+            path,
+            json_body=json_body,
+            timeout=timeout,
+            expected_status=expected_status,
+        )
+
+    async def patch_json(
+        self,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> dict[str, Any]:
+        """PATCH JSON and return a JSON object response."""
+        return await self._request_json(
+            "PATCH",
+            path,
+            json_body=json_body,
+            timeout=timeout,
+            expected_status=expected_status,
+        )
+
+    async def delete_json(
+        self,
+        path: str,
+        *,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> dict[str, Any]:
+        """DELETE and return a JSON object response (empty dict for 204)."""
+        return await self._request_json(
+            "DELETE",
+            path,
+            timeout=timeout,
+            expected_status=expected_status,
+        )
+
+    async def post_multipart(
+        self,
+        path: str,
+        *,
+        files: list[tuple[str, tuple[str, bytes, str]]],
+        form_fields: dict[str, str] | None = None,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> dict[str, Any]:
+        """POST multipart/form-data (protocol / data-file uploads)."""
+        try:
+            response = await self._client.request(
+                "POST",
+                path,
+                files=files,
+                data=form_fields,
+                timeout=timeout,
+            )
+        except httpx.TimeoutException as exc:
+            raise RobotTimeoutError(
+                f"Timed out requesting {path}",
+                path=path,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise RobotApiError(
+                f"Request failed for {path}: {exc}",
+                path=path,
+            ) from exc
+
+        allowed = expected_status
+        if allowed is None:
+            ok = response.status_code < 400
+        else:
+            ok = response.status_code in allowed
+        if not ok:
+            raise RobotApiError(
+                f"HTTP {response.status_code} for {path}",
+                status_code=response.status_code,
+                path=path,
+                body=response.text,
+            )
+        if response.status_code == 204 or not response.content:
+            return {}
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RobotApiError(
+                f"Expected JSON object from {path}",
+                status_code=response.status_code,
+                path=path,
+                body=response.text,
+            )
+        return data
+
     async def get_bytes(
         self,
         path: str,
@@ -110,6 +212,33 @@ class RobotHttpSession:
             expected_status=expected_status,
         )
         return response.content, response.headers.get("content-type")
+
+    async def get_with_status(
+        self,
+        path: str,
+        *,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] = (200, 201, 204, 404),
+    ) -> tuple[int, dict[str, Any] | None]:
+        """GET and return ``(status_code, json_object_or_none)``.
+
+        Useful for CRS-off parameterized probes where 404 is acceptable.
+        """
+        response = await self._request_raw(
+            "GET",
+            path,
+            timeout=timeout,
+            expected_status=expected_status,
+        )
+        if response.status_code == 204 or not response.content:
+            return response.status_code, None
+        try:
+            data = response.json()
+        except ValueError:
+            return response.status_code, None
+        if isinstance(data, dict):
+            return response.status_code, data
+        return response.status_code, None
 
     async def post_bytes(
         self,
