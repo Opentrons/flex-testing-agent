@@ -8,7 +8,10 @@ Primary product docs:
 - [Approved PRD - Compliance Readiness Software V2](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5339512880)
 - [Access Control Mode Overview (PER)](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5433393193)
 - [QA Test Checklist for RCS (formerly ACM)](https://opentrons.atlassian.net/wiki/spaces/~712020ac583a1878a5430aaf1db6793f399ca1/pages/6195970453)
-- Exit / restore: [EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176) (serial / assisted wipe)
+- Exit / restore: root `opentrons_disable_crs` (password `{serial}-0000`; see
+  [Enter / exit CRS](#enter--exit-crs-operator-notes)), or
+  [EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176) wipe as fallback
+- Harness Confluence mirror: [Flex testing harness: CRS endpoint matrix (RBARM)](https://opentrons.atlassian.net/wiki/spaces/RBARM/pages/6382649592)
 
 This harness treats CRS as a **dual-mode** problem:
 
@@ -153,16 +156,85 @@ creating fixtures). Brief store-settle retries only; do not soft-accept 503.
 Live CRS-off A+B+C on KansasFLEX (`v9.1.2-alpha.6`): Tier A 51/0, Tier B 35/0
 (skipped=0), Tier C 7/0 via `flex-test api-suite`.
 
+## Enter / exit CRS (operator notes)
+
+The harness still **never** enables CRS via
+`PATCH /auth/settings/accessControlEnabled`. When an operator manually enters
+CRS on a lab robot (ODD / product flow), use the notes below. Confirm behavior
+on the build under test; product may still evolve.
+
+### Service password (enter and disable CRS)
+
+On **newer internal builds** (confirm on the robot under test), the password
+used to **enter** CRS and to run **`opentrons_disable_crs`** is the robot
+**serial number** with `-0000` appended.
+
+Example: if `GET /health` reports `robot_serial` `FLXA2020241021003`, the CRS
+service PIN is `FLXA2020241021003-0000`.
+
+This is **not** the same secret as the **Robot Encryption Key** used for HTTPS
+CA trust (see [crs-on-setup.md](crs-on-setup.md)). On `ot3@4.0.0-alpha.12`
+(KansasFLEX, verified 2026-08-07), `{serial}-0000` does **not** decrypt
+`GET /keys/external/ca/encryptedCerts`.
+
+Find the serial from inspect / health, the robot label, or ODD settings (not
+from `ROBOT_NAME`).
+
+### Create `testadmin` / `testuser` yourself
+
+Robots that enter CRS **no longer auto-create** the legacy lab users
+`testadmin` and `testuser`. Create them yourself as part of the enter-CRS /
+onboarding flow if you still need those accounts (Postman, older QA scripts,
+role matrix fixtures).
+
+Typical lab credentials (when you create the users yourself):
+
+| Username | Password (common lab convention) |
+|----------|----------------------------------|
+| `testadmin` | `testadminpassword` |
+| `testuser` | `testuserpassword` |
+
+Do not assume those users exist after enablement. Older docs (for example
+[Postman setup](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/3814424622))
+may still name them; treat creation as a required enter-CRS step now.
+
+### Disable CRS from a root shell (`opentrons_disable_crs`)
+
+On current builds you can turn CRS **off** from a **root** shell without a full
+EXEC-2176 wipe:
+
+```bash
+opentrons_disable_crs
+```
+
+Requirements:
+
+- Run as **root** over **SSH** or **FTDI serial** ([serial-console.md](serial-console.md))
+- Enter the same service password as enter-CRS: `{robot_serial}-0000`
+- Do **not** invoke this as a protocol subprocess / in-protocol shell call; use
+  an interactive (or scripted) root shell only
+
+This is the preferred lab exit when available. Keep EXEC-2176 / assisted wipe as
+the fallback when the binary is missing, the password path fails, or product
+docs still require wipe.
+
+Harness policy: do not wrap `opentrons_disable_crs` as a first-class mutation
+capability until CRS-on testing is an explicit operator request with lockout
+acceptance. Prefer documenting the manual path here.
+
 ## CRS-on suite (deferred)
 
 Prerequisites:
 
-1. Documented restore for **disabling** CRS (lab wipe per EXEC-2176 / service
-   procedure). The public API cannot turn CRS off.
+1. Documented restore for **disabling** CRS:
+   `opentrons_disable_crs` from root SSH/serial (above), or lab wipe per
+   EXEC-2176 / service procedure when that path is unavailable. The public HTTP
+   API still cannot turn CRS off.
 2. Documented **remote-access carveout** (below) so QA can still use SSH /
    Jupyter / devtools while CRS stays on.
 3. Dedicated robot or accepted lockout risk (not casually KansasFLEX).
-4. OAuth client + role fixtures (Admin / User / Auditor / Service).
+4. OAuth client + role fixtures (Admin / User / Auditor / Service), including
+   **manually created** `testadmin` / `testuser` (or equivalent) after enter CRS.
 
 Then for each catalog entry:
 
@@ -228,12 +300,13 @@ ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 `allow-remote-access` is `DISRUPTIVE` (remounts `/` RW) and requires
 `ALLOW_MUTATIONS=true`. Prefer HTTP when network + CRS-off still work.
 
-### Not the same as EXEC-2176
+### Not the same as disable / wipe
 
 | Goal | Path |
 |------|------|
 | Keep CRS on, restore lab SSH/Jupyter/devtools | Serial allow-file carveout (this section) |
-| Turn CRS **off** again | EXEC-2176 / assisted wipe (not this harness) |
+| Turn CRS **off** again (preferred lab path) | Root shell: `opentrons_disable_crs` with `{serial}-0000` (see Enter / exit CRS) |
+| Turn CRS **off** when disable binary unavailable | EXEC-2176 / assisted wipe (not this harness) |
 
 ## Safety
 
@@ -259,8 +332,9 @@ Unchanged from [safety-model.md](safety-model.md):
    beyond the current 7 cleanup steps.
 5. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
 6. **OAuth + users clients**: prepare dual-mode session (no enable).
-7. **CRS-on authorization matrix**: after remote-access carveout + EXEC-2176
-   restore story; map to QA checklist sections (login, roles, settings, logs).
+7. **CRS-on authorization matrix**: after remote-access carveout + disable path;
+   map to QA checklist sections (login, roles, settings, logs). Bootstrap:
+   [crs-on-setup.md](crs-on-setup.md).
 8. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
 
 ## Related harness docs

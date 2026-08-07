@@ -170,10 +170,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         service=ApiService.AUTH_SERVER,
         group="auth",
         risk_level=RiskLevel.DISRUPTIVE,
-        required_scopes=(
-            "users.read.others",
-            "users.write",
-        ),
+        required_scopes=("users.write",),
         parameterized=True,
         crs_off_acceptable_status=(
             200,
@@ -231,10 +228,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         service=ApiService.AUTH_SERVER,
         group="auth",
         risk_level=RiskLevel.READ_ONLY,
-        required_scopes=(
-            "users.write",
-            "users.read.self",
-        ),
+        required_scopes=("users.read.self",),
         crs_off_acceptable_status=(
             200,
             401,
@@ -294,7 +288,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         service=ApiService.AUTH_SERVER,
         group="auth",
         risk_level=RiskLevel.REVERSIBLE_MUTATION,
-        required_scopes=("users.read.self",),
+        required_scopes=("users.write.self",),
         crs_off_acceptable_status=(
             200,
             201,
@@ -333,7 +327,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
     EndpointSpec(
         name="post_oauth2_introspect",
         method=HttpMethod.POST,
-        path="/oauth2/introspect",
+        path="/auth/oauth2/introspect",
         service=ApiService.AUTH_SERVER,
         group="auth",
         risk_level=RiskLevel.REVERSIBLE_MUTATION,
@@ -346,7 +340,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
     EndpointSpec(
         name="post_oauth2_token",
         method=HttpMethod.POST,
-        path="/oauth2/token",
+        path="/auth/oauth2/token",
         service=ApiService.AUTH_SERVER,
         group="auth",
         risk_level=RiskLevel.REVERSIBLE_MUTATION,

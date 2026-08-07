@@ -1,0 +1,62 @@
+"""OAuth2 token client (ROPC) for CRS-on testing."""
+
+from __future__ import annotations
+
+from flex_testing_agent.clients.session import RobotHttpSession
+from flex_testing_agent.models.auth_users import (
+    TokenIntrospectionResponse,
+    TokenResponse,
+)
+
+DEFAULT_OAUTH_CLIENT_ID = "opentrons_app"
+
+
+class OAuthClient:
+    """Atomic client for ``/auth/oauth2/*`` endpoints."""
+
+    def __init__(
+        self,
+        session: RobotHttpSession,
+        *,
+        client_id: str = DEFAULT_OAUTH_CLIENT_ID,
+    ) -> None:
+        self._session = session
+        self._client_id = client_id
+
+    async def get_token(
+        self,
+        username: str,
+        password: str,
+        *,
+        scope: str | None = None,
+        timeout: float | None = None,
+    ) -> TokenResponse:
+        """Resource-owner password credentials grant."""
+        form: dict[str, str] = {
+            "grant_type": "password",
+            "client_id": self._client_id,
+            "username": username,
+            "password": password,
+        }
+        if scope is not None:
+            form["scope"] = scope
+        payload = await self._session.post_form(
+            "/auth/oauth2/token",
+            form=form,
+            timeout=timeout,
+        )
+        return TokenResponse.model_validate(payload)
+
+    async def introspect_token(
+        self,
+        token: str,
+        *,
+        timeout: float | None = None,
+    ) -> TokenIntrospectionResponse:
+        """RFC 7662 token introspection for an access token."""
+        payload = await self._session.post_form(
+            "/auth/oauth2/introspect",
+            form={"token": token, "client_id": self._client_id},
+            timeout=timeout,
+        )
+        return TokenIntrospectionResponse.model_validate(payload)

@@ -1,8 +1,8 @@
-"""Auth-server settings client (detect-only for access control).
+"""Auth-server settings client for access-control detection and enablement.
 
-Only ``GET /auth/settings/accessControlEnabled`` is implemented.
-``PATCH`` enable is intentionally omitted: the API accepts only ``true``
-and cannot disable access control without Opentrons assistance.
+``PATCH /auth/settings/accessControlEnabled`` accepts only ``true`` and is
+one-way. The harness exposes enable only via ``flex-test crs enable`` with an
+explicit operator confirmation flag.
 """
 
 from __future__ import annotations
@@ -63,6 +63,35 @@ class AuthSettingsClient:
                 detail="Response missing accessControlEnabled field.",
             )
 
+        enabled = bool(data["accessControlEnabled"])
+        return AccessControlStatus(
+            state=(
+                AccessControlState.ENABLED if enabled else AccessControlState.DISABLED
+            ),
+            raw_enabled=enabled,
+        )
+
+    async def enable_access_control(
+        self, *, timeout: float | None = None
+    ) -> AccessControlStatus:
+        """PATCH ``accessControlEnabled: true`` (one-way; CRS on).
+
+        Callable without a bearer token while CRS is still off. After success,
+        protected endpoints require OAuth scopes.
+        """
+        payload = await self._session.patch_json(
+            "/auth/settings/accessControlEnabled",
+            json_body={"data": {"accessControlEnabled": True}},
+            timeout=timeout,
+            expected_status=(200,),
+        )
+        data = payload.get("data", payload)
+        if not isinstance(data, dict) or "accessControlEnabled" not in data:
+            raise RobotApiError(
+                "Response missing accessControlEnabled field.",
+                status_code=200,
+                path="/auth/settings/accessControlEnabled",
+            )
         enabled = bool(data["accessControlEnabled"])
         return AccessControlStatus(
             state=(

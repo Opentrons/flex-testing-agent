@@ -1,0 +1,65 @@
+# CRS-on test user fixtures for flex-testing-agent.
+#
+# Lab defaults (KansasFLEX harness): bootstrap admin + shared fixture password
+# are hardcoded below. Override via .env when needed:
+#   CRS_FIXTURE_PASSWORD          — shared password for enabled fixture users
+#   CRS_PASSWORD_<ENV_SUFFIX>     — per-user override (see env_suffix)
+#   CRS_ADMIN_USERNAME / CRS_ADMIN_PASSWORD — override bootstrap admin
+#
+# Enable CRS: ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
+# Provision:  ALLOW_MUTATIONS=true uv run flex-test crs provision-users
+
+version: 1
+
+bootstrap_admin:
+  username: flex_harness_admin
+  password: "FlexHarnessAdmin1!"
+  full_name: Flex harness bootstrap admin
+
+defaults:
+  password_env: CRS_FIXTURE_PASSWORD
+  lab_password: "FlexHarnessUsers1!"
+
+users:
+  - username: flex_test_admin
+    full_name: Flex test administrator
+    account_type: admin
+    enabled: true
+    env_suffix: FLEX_TEST_ADMIN
+    notes: Primary harness admin; create if missing (requires bootstrap admin when CRS on).
+
+  - username: flex_test_operator
+    full_name: Flex test operator
+    account_type: user
+    enabled: true
+    env_suffix: FLEX_TEST_OPERATOR
+    notes: Operator scopes (protocols, robot control, updates; no user admin).
+
+  - username: flex_test_auditor
+    full_name: Flex test auditor
+    account_type: auditor
+    enabled: true
+    env_suffix: FLEX_TEST_AUDITOR
+    notes: Read-only users.read.others; no protocol/run mutations.
+
+  - username: flex_test_service
+    full_name: Flex test service account
+    account_type: service
+    enabled: true
+    env_suffix: FLEX_TEST_SERVICE
+    notes: All scopes (service); use sparingly in matrix tests.
+
+  # Legacy Postman names — not auto-created by product anymore; enable if you want them.
+  - username: testadmin
+    full_name: Legacy test admin
+    account_type: admin
+    enabled: false
+    env_suffix: TESTADMIN
+    notes: Postman setup convention; password often testadminpassword when enabled.
+
+  - username: testuser
+    full_name: Legacy test user
+    account_type: user
+    enabled: false
+    env_suffix: TESTUSER
+    notes: Postman setup convention; password often testuserpassword when enabled.

@@ -23,6 +23,7 @@ from flex_testing_agent.orchestration.run_state import (
     DesiredRunState,
     RunStateSnapshot,
     ensure_run_state,
+    release_current_run,
 )
 from flex_testing_agent.robots.flex import FlexRobot
 
@@ -689,20 +690,18 @@ async def _probe_parameterized_get(
     )
 
 
-async def run_crs_off_tier_b(
+async def _execute_tier_b(
     robot: FlexRobot,
     *,
     create_fixtures: bool = False,
     protocol_path: Path | None = None,
     run_state: DesiredRunState = DesiredRunState.CURRENT_IDLE,
     ensure_run_state_flag: bool = False,
+    evidence_key: str = "crs_off_tier_b",
+    capability_prefix: str = "crs_off_tier_b",
+    auth_username: str | None = None,
 ) -> TierBResult:
-    """Probe parameterized catalog GETs using available fixtures.
-
-    Default run presence is ``current-idle`` so run-scoped GETs and camera
-    run-active behavior are exercised against a known state (see crs-testing.md).
-    """
-    await _ensure_crs_off(robot)
+    """Shared Tier B implementation (CRS on or off; caller sets preconditions)."""
     smoke = protocol_path or DEFAULT_SMOKE_PROTOCOL
 
     # Upload protocol first when needed so CURRENT_IDLE ensure can create a run.
@@ -712,14 +711,14 @@ async def run_crs_off_tier_b(
             ensure_mutation_allowed(
                 robot.settings,
                 risk_level=RiskLevel.REVERSIBLE_MUTATION,
-                capability_name="crs_off_tier_b_upload_protocol",
+                capability_name=f"{capability_prefix}_upload_protocol",
             )
             uploaded = await robot.protocols.upload_protocol(smoke)
             protocol_id = robot.protocols.protocol_id_from_upload(uploaded)
             if protocol_id is None:
                 raise RuntimeError("Protocol upload succeeded but id missing")
-            robot.raw_evidence["crs_off_protocol_upload"] = uploaded
-            log.info("crs_off_uploaded_protocol", protocol_id=protocol_id)
+            robot.raw_evidence[f"{capability_prefix}_protocol_upload"] = uploaded
+            log.info("tier_b_uploaded_protocol", protocol_id=protocol_id)
 
     protocols = await robot.protocols.list_protocol_summaries()
     protocol_id = str(protocols[0]["id"]) if protocols else None
@@ -728,7 +727,7 @@ async def run_crs_off_tier_b(
         run_state,
         ensure=ensure_run_state_flag or create_fixtures,
         protocol_id=protocol_id,
-        capability_name="crs_off_tier_b_run_state",
+        capability_name=f"{capability_prefix}_run_state",
     )
 
     fixtures = await _gather_fixtures(
@@ -737,6 +736,8 @@ async def run_crs_off_tier_b(
         protocol_path=smoke,
         preferred_run_id=snap.current_run_id,
     )
+    if auth_username is not None:
+        fixtures.username = auth_username
 
     results: list[ProbeCallResult] = []
     skipped: list[str] = []
@@ -787,8 +788,31 @@ async def run_crs_off_tier_b(
         fail_count=sum(1 for r in results if not r.ok),
         skipped_paths=skipped,
     )
-    robot.raw_evidence["crs_off_tier_b"] = summary.model_dump(mode="json")
+    robot.raw_evidence[evidence_key] = summary.model_dump(mode="json")
     return summary
+
+
+async def run_crs_off_tier_b(
+    robot: FlexRobot,
+    *,
+    create_fixtures: bool = False,
+    protocol_path: Path | None = None,
+    run_state: DesiredRunState = DesiredRunState.CURRENT_IDLE,
+    ensure_run_state_flag: bool = False,
+) -> TierBResult:
+    """Probe parameterized catalog GETs using available fixtures.
+
+    Default run presence is ``current-idle`` so run-scoped GETs and camera
+    run-active behavior are exercised against a known state (see crs-testing.md).
+    """
+    await _ensure_crs_off(robot)
+    return await _execute_tier_b(
+        robot,
+        create_fixtures=create_fixtures,
+        protocol_path=protocol_path,
+        run_state=run_state,
+        ensure_run_state_flag=ensure_run_state_flag,
+    )
 
 
 async def _tier_c_step(
@@ -839,11 +863,30 @@ async def run_crs_off_tier_c(
         capability_name=TIER_C_DESCRIPTOR.name,
     )
     await _ensure_crs_off(robot)
+    return await _execute_tier_c(
+        robot,
+        run_state=run_state,
+        ensure_run_state_flag=ensure_run_state_flag,
+    )
+
+
+async def _execute_tier_c(
+    robot: FlexRobot,
+    *,
+    run_state: DesiredRunState = DesiredRunState.NO_CURRENT,
+    ensure_run_state_flag: bool = True,
+    evidence_key: str = "crs_off_tier_c",
+    run_state_capability: str = "crs_off_tier_c_run_state",
+    suite_label: str = "crs_off_tier_c",
+    run_signoff_label: str | None = None,
+) -> TierCResult:
+    """Shared Tier C reversible mutations (CRS on or off; caller sets preconditions)."""
     snap = await ensure_run_state(
         robot,
         run_state,
         ensure=ensure_run_state_flag,
-        capability_name="crs_off_tier_c_run_state",
+        capability_name=run_state_capability,
+        signed_by=run_signoff_label,
     )
 
     steps: list[MutationStepResult] = []
@@ -861,7 +904,7 @@ async def run_crs_off_tier_c(
         return f"before={on_before} restored={restored.get('on')}"
 
     async def _client_data() -> str:
-        payload = {"source": "flex-testing-agent", "suite": "crs_off_tier_c"}
+        payload = {"source": "flex-testing-agent", "suite": suite_label}
         put = await robot.client_data.put(CLIENT_DATA_KEY, payload)
         got = await robot.client_data.get(CLIENT_DATA_KEY)
         await robot.client_data.delete(CLIENT_DATA_KEY)
@@ -943,19 +986,42 @@ async def run_crs_off_tier_c(
                     await robot.labware_offsets.delete_one(offset_id)
 
     async def _protocol_run_delete() -> str:
-        uploaded = await robot.protocols.upload_protocol(DEFAULT_SMOKE_PROTOCOL)
-        protocol_id = robot.protocols.protocol_id_from_upload(uploaded)
-        if protocol_id is None:
-            raise RuntimeError("tier-c cleanup protocol upload missing id")
-        await _wait_protocol_analysis(robot, protocol_id)
-        created = await robot.runs.create_run(protocol_id=protocol_id)
-        run_id = robot.runs.run_id_from_create(created)
-        if run_id is None:
-            raise RuntimeError("tier-c cleanup run create missing id")
-        await robot.runs.set_current(run_id, current=False)
-        await robot.runs.delete_run(run_id)
-        await robot.protocols.delete_protocol(protocol_id)
-        return f"deleted protocol={protocol_id[:8]} run={run_id[:8]}"
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".py",
+            delete=False,
+            prefix="flex_tier_c_",
+        ) as tmp:
+            tmp.write(
+                "# flex-testing-agent tier-c throwaway\n"
+                f"# created-at {time.time()}\n"
+                "from opentrons import protocol_api\n\n"
+                'requirements = {"robotType": "Flex", "apiLevel": "2.20"}\n'
+                'metadata = {"protocolName": "flex-tier-c-throwaway"}\n\n'
+                "def run(protocol: protocol_api.ProtocolContext) -> None:\n"
+                "    protocol.comment('tier-c throwaway')\n"
+            )
+            throwaway_path = Path(tmp.name)
+        try:
+            uploaded = await robot.protocols.upload_protocol(throwaway_path)
+            protocol_id = robot.protocols.protocol_id_from_upload(uploaded)
+            if protocol_id is None:
+                raise RuntimeError("tier-c cleanup protocol upload missing id")
+            await _wait_protocol_analysis(robot, protocol_id)
+            created = await robot.runs.create_run(protocol_id=protocol_id)
+            run_id = robot.runs.run_id_from_create(created)
+            if run_id is None:
+                raise RuntimeError("tier-c cleanup run create missing id")
+            await release_current_run(
+                robot,
+                run_id,
+                signed_by=run_signoff_label,
+            )
+            await robot.runs.delete_run(run_id)
+            await robot.protocols.delete_protocol(protocol_id)
+            return f"deleted protocol={protocol_id[:8]} run={run_id[:8]}"
+        finally:
+            throwaway_path.unlink(missing_ok=True)
 
     await _tier_c_step(steps, "lights_toggle_restore", _lights())
     await _tier_c_step(steps, "client_data_put_get_delete", _client_data())
@@ -977,5 +1043,5 @@ async def run_crs_off_tier_c(
         ok_count=sum(1 for s in steps if s.ok),
         fail_count=sum(1 for s in steps if not s.ok),
     )
-    robot.raw_evidence["crs_off_tier_c"] = summary.model_dump(mode="json")
+    robot.raw_evidence[evidence_key] = summary.model_dump(mode="json")
     return summary

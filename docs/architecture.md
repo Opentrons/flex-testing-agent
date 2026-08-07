@@ -105,8 +105,10 @@ CRS-off coverage is parameter-free GETs via `ReadonlyClient`.
 When CRS is enabled later, `RobotHttpSession` can attach an optional bearer
 token. This harness does not implement enablement (one-way API). CRS-on matrix
 testing waits on restore: serial **remote-access carveout** for SSH/Jupyter while
-CRS stays on (`flex-test serial allow-remote-access`), and EXEC-2176 wipe to turn
-CRS off. See [crs-testing.md](crs-testing.md).
+CRS stays on (`flex-test serial allow-remote-access`), root-shell
+`opentrons_disable_crs` (password `{robot_serial}-0000`) to turn CRS off, and
+EXEC-2176 wipe as fallback. Enter-CRS no longer auto-creates `testadmin` /
+`testuser`; create them manually. See [crs-testing.md](crs-testing.md).
 
 ## Future agent integration
 

@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from flex_testing_agent.cli.crs import crs_app
 from flex_testing_agent.cli.logs import logs_app
 from flex_testing_agent.cli.serial import serial_app
 from flex_testing_agent.config.settings import (
@@ -39,6 +40,7 @@ app = typer.Typer(
 )
 app.add_typer(serial_app, name="serial")
 app.add_typer(logs_app, name="logs")
+app.add_typer(crs_app, name="crs")
 console = Console()
 log = get_logger(__name__)
 

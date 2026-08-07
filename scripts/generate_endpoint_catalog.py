@@ -80,6 +80,13 @@ SCOPE_API = {
     "Scope.USERS_WRITE": "users.write",
 }
 
+SCOPE_OVERRIDES: dict[tuple[str, str], tuple[str, ...]] = {
+    # ``wrap_route`` scan window can pick up unrelated router dependencies.
+    ("GET", "/auth/users/self"): ("users.read.self",),
+    ("PATCH", "/auth/users/self"): ("users.write.self",),
+    ("DELETE", "/auth/users/byUsername/{username}"): ("users.write",),
+}
+
 ACCEPTABLE_OVERRIDES: dict[tuple[str, str], tuple[int, ...]] = {
     ("GET", "/server/ssh_keys"): (200, 403),
     ("GET", "/motors/engaged"): (200, 500),
@@ -334,7 +341,7 @@ def main() -> None:
         for tok in re.findall(r"Scope\.[A-Z_]+", scopes_raw):
             if tok in SCOPE_API and SCOPE_API[tok] not in scopes:
                 scopes.append(SCOPE_API[tok])
-        scopes_t = tuple(scopes)
+        scopes_t = SCOPE_OVERRIDES.get((method, path), tuple(scopes))
         param = "{" in path
         if method == "GET":
             acc = ACCEPTABLE_OVERRIDES.get((method, path), (200,))

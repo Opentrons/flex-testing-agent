@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ssl
 from typing import Any
 
 from flex_testing_agent.clients.auth_settings import AuthSettingsClient
@@ -15,6 +16,7 @@ from flex_testing_agent.clients.labware_offsets import LabwareOffsetsClient
 from flex_testing_agent.clients.logs import LogsClient
 from flex_testing_agent.clients.maintenance_runs import MaintenanceRunsClient
 from flex_testing_agent.clients.modules import ModulesClient
+from flex_testing_agent.clients.oauth import OAuthClient
 from flex_testing_agent.clients.protocols import ProtocolsClient
 from flex_testing_agent.clients.readonly import ReadonlyClient
 from flex_testing_agent.clients.robot_control import RobotControlClient
@@ -24,6 +26,7 @@ from flex_testing_agent.clients.session import RobotHttpSession
 from flex_testing_agent.clients.subsystems import SubsystemsClient
 from flex_testing_agent.clients.update import UpdateClient
 from flex_testing_agent.clients.update_health import UpdateHealthClient
+from flex_testing_agent.clients.users import UsersClient
 from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.models.access_control import (
     AccessControlState,
@@ -31,6 +34,42 @@ from flex_testing_agent.models.access_control import (
 )
 from flex_testing_agent.models.health import HealthReport, UpdateHealthReport
 from flex_testing_agent.models.snapshot import RobotSnapshot
+from flex_testing_agent.robot_certs.resolve import resolve_httpx_verify
+
+DEFAULT_CRS_USER_NOTES = "flex-testing-agent CRS-on probe"
+
+
+def _effective_user_notes(
+    settings: Settings,
+    *,
+    access_token: str | None,
+) -> str | None:
+    """Return CRS audit notes when OAuth is in use."""
+    if access_token is None:
+        return None
+    configured = settings.robot_user_notes
+    if configured is not None and not configured.strip():
+        return None
+    return configured or DEFAULT_CRS_USER_NOTES
+
+
+def build_robot_http_session(
+    settings: Settings,
+    *,
+    access_token: str | None = None,
+) -> RobotHttpSession:
+    """Create a session with HTTPS CA verify when configured."""
+    host = settings.require_robot_host()
+    verify: bool | ssl.SSLContext = True
+    if settings.robot_use_https:
+        verify = resolve_httpx_verify(settings, host=host)
+    return RobotHttpSession(
+        settings.robot_base_url,
+        timeout_seconds=settings.robot_request_timeout_seconds,
+        access_token=access_token,
+        user_notes=_effective_user_notes(settings, access_token=access_token),
+        verify=verify,
+    )
 
 
 class FlexRobot:
@@ -49,9 +88,8 @@ class FlexRobot:
     ) -> None:
         self.settings = settings
         self._owns_session = session is None
-        self._session = session or RobotHttpSession(
-            settings.robot_base_url,
-            timeout_seconds=settings.robot_request_timeout_seconds,
+        self._session = session or build_robot_http_session(
+            settings,
             access_token=access_token,
         )
         self.health = HealthClient(self._session)
@@ -72,6 +110,8 @@ class FlexRobot:
         self.robot_control = RobotControlClient(self._session)
         self.robot_settings = RobotSettingsClient(self._session)
         self.subsystems = SubsystemsClient(self._session)
+        self.users = UsersClient(self._session)
+        self.oauth = OAuthClient(self._session)
         self._raw_evidence: dict[str, Any] = {}
 
     @property

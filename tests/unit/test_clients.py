@@ -9,7 +9,10 @@ import respx
 from flex_testing_agent.clients.auth_settings import AuthSettingsClient
 from flex_testing_agent.clients.errors import RobotApiError, RobotTimeoutError
 from flex_testing_agent.clients.health import HealthClient
-from flex_testing_agent.clients.session import RobotHttpSession
+from flex_testing_agent.clients.session import (
+    OPENTRONS_USER_NOTES_HEADER,
+    RobotHttpSession,
+)
 from flex_testing_agent.clients.update_health import UpdateHealthClient
 from flex_testing_agent.models.access_control import AccessControlState
 
@@ -120,4 +123,26 @@ async def test_session_omits_authorization_without_token() -> None:
 async def test_session_includes_bearer_when_token_set() -> None:
     session = RobotHttpSession("http://127.0.0.1:31950", access_token="abc")
     assert session._client.headers["Authorization"] == "Bearer abc"
+    await session.aclose()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
+async def test_session_adds_user_notes_on_mutating_requests() -> None:
+    notes = "flex-testing-agent test"
+    session = RobotHttpSession(
+        "http://127.0.0.1:31950",
+        user_notes=notes,
+    )
+    get_route = respx.get("http://127.0.0.1:31950/robot/lights").mock(
+        return_value=httpx.Response(200, json={"on": True})
+    )
+    post_route = respx.post("http://127.0.0.1:31950/robot/lights").mock(
+        return_value=httpx.Response(200, json={"on": False})
+    )
+    await session.get_json("/robot/lights")
+    await session.post_json("/robot/lights", json_body={"on": False})
+    assert OPENTRONS_USER_NOTES_HEADER not in get_route.calls[0].request.headers
+    assert post_route.calls[0].request.headers[OPENTRONS_USER_NOTES_HEADER] == notes
     await session.aclose()

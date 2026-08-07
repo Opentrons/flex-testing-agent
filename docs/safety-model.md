@@ -14,7 +14,8 @@ This harness operates against a physical Flex robot. Safety is enforced in code 
    Do not invent ad-hoc motion URLs or ungated home/move CLI commands.
 6. **No arbitrary shell / HTTP / URL construction** for agents.
 7. **Credential redaction** in evidence writers.
-8. **Access control must not be enabled** by this harness.
+8. **Access control enable** is gated: only via
+   ``flex-test crs enable --confirm-one-way`` (one-way API; see below).
 
 ## Access control / CRS
 
@@ -24,11 +25,11 @@ undone through the public API. Treat enablement as `DISRUPTIVE`.
 
 Harness policy:
 
-- Detect via GET only
-- Capability `enable_access_control` is unimplemented and blocked
+- Detect via GET on all paths
+- **Enable only** via `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`
+  (creates bootstrap admin `flex_harness_admin`, provisions fixture users)
 - Prefer thorough testing with CRS **off** first ([crs-testing.md](crs-testing.md))
-- Do **not** enable CRS from the harness until operators accept lockout risk and
-  know both restore paths below
+- Before enable, operators must accept lockout risk and know restore paths below
 
 ### Restore paths when CRS is on
 
@@ -37,7 +38,16 @@ Harness policy:
    so SSH / Jupyter / devtools work again. Harness:
    `ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access`.
    Cleared on the next OS update. Details: [crs-testing.md](crs-testing.md).
-2. **Full CRS exit (turn CRS off):** EXEC-2176 / assisted wipe (not automated here).
+2. **Full CRS exit (turn CRS off, preferred lab path):** as root over SSH or
+   FTDI serial, run `opentrons_disable_crs` and enter password
+   `{robot_serial}-0000` (same as enter-CRS). Do not run this from a protocol
+   subprocess. Details: [crs-testing.md](crs-testing.md#enter--exit-crs-operator-notes).
+3. **Full CRS exit (fallback):** EXEC-2176 / assisted wipe when
+   `opentrons_disable_crs` is unavailable or fails (not automated here).
+
+Enter-CRS lab note: robots no longer auto-create `testadmin` / `testuser`;
+create those users yourself during the enter-CRS flow if you need them
+([crs-testing.md](crs-testing.md#enter--exit-crs-operator-notes)).
 
 On edge / 10.0 alphas with remote-access disable: CRS off leaves SSH/Jupyter
 alone; CRS on disables them unless the allow file exists (auth-server check fails

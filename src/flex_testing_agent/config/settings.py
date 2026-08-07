@@ -50,6 +50,32 @@ class Settings(BaseSettings):
         default=False,
         description="Use HTTPS (requires CA trust). Milestone 1 defaults to HTTP.",
     )
+    robot_certs_dir: str = Field(
+        default="",
+        description=(
+            "Directory for robot CA PEM files and registry.yaml. "
+            "Empty means {ARTIFACT_DIRECTORY}/robot-certs."
+        ),
+    )
+    robot_ca_pem: Path | None = Field(
+        default=None,
+        description="Optional explicit CA PEM path (overrides registry lookup).",
+    )
+    crs_service_password: str | None = Field(
+        default=None,
+        description=(
+            "Robot Encryption Key for trust-ca CA decrypt (ODD rotating key). "
+            "Not the CRS service PIN ({serial}-0000)."
+        ),
+    )
+    crs_admin_username: str | None = Field(
+        default=None,
+        description="Bootstrap admin username for CRS-on user provisioning.",
+    )
+    crs_admin_password: str | None = Field(
+        default=None,
+        description="Bootstrap admin password for CRS-on user provisioning.",
+    )
     robot_request_timeout_seconds: float = Field(default=30.0, gt=0)
     robot_health_timeout_seconds: float = Field(default=10.0, gt=0)
     database_url: str = Field(
@@ -73,6 +99,14 @@ class Settings(BaseSettings):
         default=None,
         description="Optional password for future access-control-on flows.",
     )
+    robot_user_notes: str | None = Field(
+        default=None,
+        description=(
+            "Opentrons-User-Notes header for CRS-on mutating HTTP requests. "
+            "When unset and OAuth is used, the harness supplies a default. "
+            "Set to empty string to disable."
+        ),
+    )
     serial_port: str = Field(
         default="",
         description=(
@@ -91,6 +125,13 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_log_level(cls, value: str) -> str:
         return value.upper()
+
+    @property
+    def robot_certs_directory(self) -> Path:
+        """Directory for HTTPS CA PEM files and registry.yaml."""
+        if self.robot_certs_dir.strip():
+            return Path(self.robot_certs_dir).expanduser().resolve()
+        return self.artifact_directory.expanduser().resolve() / "robot-certs"
 
     @property
     def robot_base_url(self) -> str:

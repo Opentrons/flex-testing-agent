@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ssl
+
 import httpx
 
 from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.logging import get_logger
+from flex_testing_agent.robot_certs.resolve import resolve_httpx_verify
 
 log = get_logger(__name__)
 
@@ -24,12 +27,13 @@ async def probe_robot_host(
     use_https: bool,
     timeout_seconds: float,
     expected_name: str | None = None,
+    verify: bool | ssl.SSLContext = True,
 ) -> dict[str, object] | None:
     """Return ``/health`` JSON if the host looks like a reachable Flex."""
     scheme = "https" if use_https else "http"
     url = f"{scheme}://{host}:{port}/health"
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds, verify=verify) as client:
             response = await client.get(
                 url,
                 headers={OPENTRONS_VERSION_HEADER: OPENTRONS_VERSION},
@@ -80,12 +84,20 @@ async def resolve_robot_host(settings: Settings) -> str:
     failures: list[str] = []
 
     for host in candidates:
+        verify: bool | ssl.SSLContext = True
+        if settings.robot_use_https:
+            try:
+                verify = resolve_httpx_verify(settings, host=host)
+            except Exception:
+                failures.append(host)
+                continue
         payload = await probe_robot_host(
             host,
             port=port,
             use_https=settings.robot_use_https,
             timeout_seconds=timeout,
             expected_name=expected_name,
+            verify=verify,
         )
         if payload is None:
             failures.append(host)

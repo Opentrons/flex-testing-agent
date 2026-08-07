@@ -9,6 +9,7 @@ Milestone 1 uses HTTP by default. HTTPS + CA bootstrap is deferred.
 
 from __future__ import annotations
 
+import ssl
 from types import TracebackType
 from typing import Any
 
@@ -17,7 +18,10 @@ import httpx
 from flex_testing_agent.clients.errors import RobotApiError, RobotTimeoutError
 
 OPENTRONS_VERSION_HEADER = "Opentrons-Version"
+OPENTRONS_USER_NOTES_HEADER = "Opentrons-User-Notes"
 OPENTRONS_VERSION = "3"
+
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 class RobotHttpSession:
@@ -29,13 +33,15 @@ class RobotHttpSession:
         *,
         timeout_seconds: float = 30.0,
         access_token: str | None = None,
-        verify: bool | str = True,
+        user_notes: str | None = None,
+        verify: bool | str | ssl.SSLContext = True,
     ) -> None:
         headers = {OPENTRONS_VERSION_HEADER: OPENTRONS_VERSION}
         if access_token:
             headers["Authorization"] = f"Bearer {access_token}"
         self.base_url = base_url.rstrip("/")
         self._access_token = access_token
+        self._user_notes = user_notes
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout_seconds,
@@ -69,6 +75,7 @@ class RobotHttpSession:
         *,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """GET a JSON object from the robot."""
         return await self._request_json(
@@ -76,7 +83,62 @@ class RobotHttpSession:
             path,
             timeout=timeout,
             expected_status=expected_status,
+            extra_headers=extra_headers,
         )
+
+    async def post_form(
+        self,
+        path: str,
+        *,
+        form: dict[str, str],
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """POST application/x-www-form-urlencoded and parse JSON object."""
+        headers = self._merge_mutation_headers("POST", extra_headers)
+        try:
+            response = await self._client.request(
+                "POST",
+                path,
+                data=form,
+                headers=headers,
+                timeout=timeout,
+            )
+        except httpx.TimeoutException as exc:
+            raise RobotTimeoutError(
+                f"Timed out requesting {path}",
+                path=path,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise RobotApiError(
+                f"Request failed for {path}: {exc}",
+                path=path,
+            ) from exc
+
+        allowed = expected_status
+        if allowed is None:
+            ok = response.status_code < 400
+        else:
+            ok = response.status_code in allowed
+        if not ok:
+            raise RobotApiError(
+                f"HTTP {response.status_code} for {path}",
+                status_code=response.status_code,
+                path=path,
+                body=response.text,
+            )
+        if response.status_code == 204 or not response.content:
+            return {}
+        data = response.json()
+        if not isinstance(data, dict):
+            raise RobotApiError(
+                f"Expected JSON object from {path}",
+                status_code=response.status_code,
+                path=path,
+                body=response.text,
+            )
+        return data
 
     async def post_json(
         self,
@@ -85,6 +147,7 @@ class RobotHttpSession:
         json_body: dict[str, Any] | None = None,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """POST JSON and return a JSON object response."""
         return await self._request_json(
@@ -93,6 +156,7 @@ class RobotHttpSession:
             json_body=json_body,
             timeout=timeout,
             expected_status=expected_status,
+            extra_headers=extra_headers,
         )
 
     async def put_json(
@@ -102,6 +166,7 @@ class RobotHttpSession:
         json_body: dict[str, Any] | None = None,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """PUT JSON and return a JSON object response."""
         return await self._request_json(
@@ -110,6 +175,7 @@ class RobotHttpSession:
             json_body=json_body,
             timeout=timeout,
             expected_status=expected_status,
+            extra_headers=extra_headers,
         )
 
     async def patch_json(
@@ -119,6 +185,7 @@ class RobotHttpSession:
         json_body: dict[str, Any] | None = None,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """PATCH JSON and return a JSON object response."""
         return await self._request_json(
@@ -127,6 +194,7 @@ class RobotHttpSession:
             json_body=json_body,
             timeout=timeout,
             expected_status=expected_status,
+            extra_headers=extra_headers,
         )
 
     async def delete_json(
@@ -135,6 +203,7 @@ class RobotHttpSession:
         *,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """DELETE and return a JSON object response (empty dict for 204)."""
         return await self._request_json(
@@ -142,6 +211,7 @@ class RobotHttpSession:
             path,
             timeout=timeout,
             expected_status=expected_status,
+            extra_headers=extra_headers,
         )
 
     async def post_multipart(
@@ -154,12 +224,14 @@ class RobotHttpSession:
         expected_status: tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
         """POST multipart/form-data (protocol / data-file uploads)."""
+        headers = self._merge_mutation_headers("POST", None)
         try:
             response = await self._client.request(
                 "POST",
                 path,
                 files=files,
                 data=form_fields,
+                headers=headers,
                 timeout=timeout,
             )
         except httpx.TimeoutException as exc:
@@ -266,12 +338,15 @@ class RobotHttpSession:
         json_body: dict[str, Any] | None = None,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
+        headers = self._merge_mutation_headers(method, extra_headers)
         try:
             response = await self._client.request(
                 method,
                 path,
                 json=json_body,
+                headers=headers,
                 timeout=timeout,
             )
         except httpx.TimeoutException as exc:
@@ -299,6 +374,21 @@ class RobotHttpSession:
             )
         return response
 
+    def _merge_mutation_headers(
+        self,
+        method: str,
+        extra_headers: dict[str, str] | None,
+    ) -> dict[str, str]:
+        """Attach CRS audit ``Opentrons-User-Notes`` for mutating requests."""
+        headers = dict(extra_headers or {})
+        if (
+            method.upper() in _MUTATING_METHODS
+            and self._user_notes
+            and OPENTRONS_USER_NOTES_HEADER not in headers
+        ):
+            headers[OPENTRONS_USER_NOTES_HEADER] = self._user_notes
+        return headers
+
     async def _request_json(
         self,
         method: str,
@@ -307,37 +397,16 @@ class RobotHttpSession:
         json_body: dict[str, Any] | None = None,
         timeout: float | None = None,
         expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        try:
-            response = await self._client.request(
-                method,
-                path,
-                json=json_body,
-                timeout=timeout,
-            )
-        except httpx.TimeoutException as exc:
-            raise RobotTimeoutError(
-                f"Timed out requesting {path}",
-                path=path,
-            ) from exc
-        except httpx.RequestError as exc:
-            raise RobotApiError(
-                f"Request failed for {path}: {exc}",
-                path=path,
-            ) from exc
-
-        allowed = expected_status
-        if allowed is None:
-            ok = response.status_code < 400
-        else:
-            ok = response.status_code in allowed
-        if not ok:
-            raise RobotApiError(
-                f"HTTP {response.status_code} for {path}",
-                status_code=response.status_code,
-                path=path,
-                body=response.text,
-            )
+        response = await self._request_raw(
+            method,
+            path,
+            json_body=json_body,
+            timeout=timeout,
+            expected_status=expected_status,
+            extra_headers=extra_headers,
+        )
         if response.status_code == 204 or not response.content:
             return {}
         data = response.json()

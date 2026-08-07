@@ -1,9 +1,9 @@
 """Access-control / operating-mode detection models.
 
-Milestone 1 detects access control state only. Enabling access control via
-``PATCH /auth/settings/accessControlEnabled`` is intentionally unsupported
-because the robot API accepts only ``true`` and cannot disable it without
-Opentrons assistance or an SSH data wipe.
+Milestone 1 detects access control state via GET. Enabling access control via
+``PATCH /auth/settings/accessControlEnabled`` is exposed only as
+``flex-test crs enable --confirm-one-way`` because the API accepts only
+``true`` and cannot disable it without Opentrons assistance or an SSH data wipe.
 """
 
 from __future__ import annotations

@@ -91,6 +91,12 @@ update). Kernel printk on the FTDI console is expected and useful
 ([docs/serial-console.md](../../docs/serial-console.md)). Details:
 [docs/crs-testing.md](../../docs/crs-testing.md).
 
+Enter / exit CRS (manual operator flow; harness never enables CRS):
+
+- Password for enter CRS and for `opentrons_disable_crs`: `{robot_serial}-0000`
+- Create `testadmin` / `testuser` yourself after enter CRS (no longer auto-created)
+- Disable: root SSH or serial `opentrons_disable_crs` (not a protocol subprocess)
+
 ## Robot logs (audit / diagnostic / protocol run)
 
 Chooser + definitions: [docs/robot-logs.md](../../docs/robot-logs.md).

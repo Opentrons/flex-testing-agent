@@ -114,7 +114,28 @@ async def snapshot_run_state(robot: FlexRobot) -> RunStateSnapshot:
     )
 
 
-async def _uncurrent_all(robot: FlexRobot) -> list[str]:
+async def release_current_run(
+    robot: FlexRobot,
+    run_id: str,
+    *,
+    signed_by: str | None = None,
+) -> None:
+    """Uncurrent a run; CRS-on requires stop + protocol-log signoff first."""
+    if signed_by:
+        status = (
+            robot.runs.status_from_run(await robot.runs.get_run(run_id)) or ""
+        ).lower()
+        if status == "idle":
+            await robot.runs.stop(run_id)
+        await robot.runs.sign_off(run_id, signed_by=signed_by)
+    await robot.runs.set_current(run_id, current=False)
+
+
+async def _uncurrent_all(
+    robot: FlexRobot,
+    *,
+    signed_by: str | None = None,
+) -> list[str]:
     """Set ``current=false`` on every current run. Returns affected ids."""
     snap = await snapshot_run_state(robot)
     changed: list[str] = []
@@ -124,7 +145,7 @@ async def _uncurrent_all(robot: FlexRobot) -> list[str]:
     for run in await robot.runs.list_run_summaries():
         if run.get("current") is True and run.get("id") is not None:
             run_id = str(run["id"])
-            await robot.runs.set_current(run_id, current=False)
+            await release_current_run(robot, run_id, signed_by=signed_by)
             changed.append(run_id)
             log.info("run_state_uncurrented", run_id=run_id)
     return changed
@@ -174,6 +195,7 @@ async def ensure_run_state(
     ensure: bool = False,
     protocol_id: str | None = None,
     capability_name: str = "ensure_run_state",
+    signed_by: str | None = None,
 ) -> RunStateSnapshot:
     """Snapshot, optionally mutate into ``desired``, then verify.
 
@@ -217,7 +239,7 @@ async def ensure_run_state(
 
     actions: dict[str, Any] = {"desired": desired.value}
     if desired is DesiredRunState.NO_CURRENT:
-        actions["uncurrented"] = await _uncurrent_all(robot)
+        actions["uncurrented"] = await _uncurrent_all(robot, signed_by=signed_by)
     elif desired is DesiredRunState.CURRENT_IDLE:
         actions["current_idle_run_id"] = await _ensure_current_idle(
             robot, protocol_id=protocol_id

@@ -110,6 +110,7 @@ and hardware issues; do not strip them from saved files.
 | Prefer HTTP / `flex-test inspect\|probe\|…` when the network is up | Invent ad-hoc `screen`/`cu`/`minicom` one-offs |
 | Use `serial list` then `serial run` / `serial shell` / `serial watch` for boot, DHCP loss, or SSH unreachable | Discard kernel printk as “noise” when debugging boot/USB |
 | Use `serial allow-remote-access` only with `ALLOW_MUTATIONS` when CRS locked out SSH | Assume allow-remote-access **disables** CRS (it does not) |
+| Prefer root-shell `opentrons_disable_crs` (+ `{serial}-0000`) to exit CRS when available | Run `opentrons_disable_crs` from a protocol subprocess |
 | Close competing serial apps if open fails busy | Encode EXEC-2176 wipe / motion as ad-hoc serial one-liners |
 | Read this doc + Confluence before first cable plug | Guess header orientation |
 
@@ -121,7 +122,7 @@ Python API: `flex_testing_agent.serial_console`
 ## Related
 
 - [Robot logs](robot-logs.md) (audit / diagnostic / protocol run; not the same as FTDI tees)
-- [CRS testing](crs-testing.md) (remote-access carveout + EXEC-2176 distinction)
+- [CRS testing](crs-testing.md) (enter/exit CRS, remote-access carveout, disable vs wipe)
 - [Pyro testing](pyro-testing.md) (SSH/serial when post-install `/health` is 502)
 - [Safety model](safety-model.md)
 - Skill: `.cursor/skills/operate-kansasflex/SKILL.md`
