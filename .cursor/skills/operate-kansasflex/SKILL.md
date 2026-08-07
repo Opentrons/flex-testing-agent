@@ -4,8 +4,9 @@ description: >-
   Operates the local Opentrons Flex KansasFLEX through flex-testing-agent CLI
   and Python APIs. Use when inspecting robot state, probing read-only endpoints,
   taking camera pictures, listing Flex OS releases, installing a robot OS build
-  with ALLOW_MUTATIONS, or running Pyro / protocol-subprocess validation on
-  internal Flex builds.
+  with ALLOW_MUTATIONS, running Pyro / protocol-subprocess validation on
+  internal Flex builds, or using the FTDI serial console (`flex-test serial`)
+  instead of Tabby.
 ---
 
 # Operate KansasFLEX
@@ -60,17 +61,42 @@ uv run flex-test timing
 # Design: docs/known-state-and-latency.md
 ```
 
+## FTDI serial console (no Tabby)
+
+Setup + agent rules: [docs/serial-console.md](../../docs/serial-console.md).
+Hardware photos / orientation:
+[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
+
+Prefer HTTP/`inspect`/`probe` when the network works. Use serial for boot logs,
+DHCP loss, or SSH unreachable. **Close Tabby first** (port is exclusive).
+
+```bash
+uv run flex-test serial list
+uv run flex-test serial shell
+uv run flex-test serial run "systemctl is-active opentrons-robot-server"
+uv run flex-test serial remote-access-status
+ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
+```
+
+CRS-on: `allow-remote-access` restores SSH/Jupyter/devtools via
+`/etc/opentrons-allow-remote-access` (does **not** turn CRS off; redo after OS
+update). Details: [docs/crs-testing.md](../../docs/crs-testing.md).
+
 ## Post-install recovery (internal / Pyro builds)
 
 After `put`, update-server may already show the new version while nginx `/health`
 returns **502** for several minutes (firmware flash + robot-server Pyro startup).
 That is often expected; see [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787).
 
-1. Wait for `/health` 200, or SSH and watch services / FW progress.
-2. SSH (lab key, not committed):
+1. Wait for `/health` 200, or SSH / serial and watch services / FW progress.
+2. SSH (lab key, not committed), or FTDI serial when DHCP/network is down:
 
 ```bash
 ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST
+
+# Alternative: Flex FTDI console (docs/serial-console.md; close Tabby first)
+uv run flex-test serial shell
+uv run flex-test serial run "systemctl is-active opentrons-robot-server"
 ```
 
 3. Ordered recovery if still broken after FW idle:

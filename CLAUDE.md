@@ -15,6 +15,7 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 - [docs/safety-model.md](docs/safety-model.md) — mutation gates, AC one-way rule
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
 - [docs/pyro-testing.md](docs/pyro-testing.md) — Pyro5 / protocol-subprocess on internal Flex builds
+- [docs/serial-console.md](docs/serial-console.md) — FTDI console setup (humans + agents; Tabby alternative)
 - Cursor rules under [`.cursor/rules/`](.cursor/rules/)
 - Skills under [`.cursor/skills/`](.cursor/skills/) (`extend-flex-harness`, `operate-kansasflex`)
 
@@ -54,6 +55,7 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 | Release catalog | `flex-test releases` / `releases/` |
 | Install robot OS | `flex-test put\|install` / `capabilities/install.py` |
 | AC detect only | `clients/auth_settings.py` (never PATCH-enable) |
+| FTDI serial console | `flex-test serial` / `serial_console/` ([docs/serial-console.md](docs/serial-console.md)) |
 
 Reference clones (gitignored):
 
@@ -86,6 +88,11 @@ ALLOW_MUTATIONS=true uv run flex-test seed-runs
 ALLOW_MUTATIONS=true uv run flex-test put <version>
 # Internal / Pyro stack:
 ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+# FTDI serial console (Tabby alternative; close Tabby first if port busy):
+uv run flex-test serial list
+uv run flex-test serial shell
+uv run flex-test serial remote-access-status
+ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 ```
 
 Operate against the robot via skill: `.cursor/skills/operate-kansasflex/SKILL.md`.

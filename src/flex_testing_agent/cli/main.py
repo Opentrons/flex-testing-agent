@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from flex_testing_agent.cli.serial import serial_app
 from flex_testing_agent.config.settings import (
     Settings,
     clear_settings_cache,
@@ -35,6 +36,7 @@ app = typer.Typer(
     help="Local robot-testing harness for Opentrons Flex (Kansas).",
     no_args_is_help=True,
 )
+app.add_typer(serial_app, name="serial")
 console = Console()
 log = get_logger(__name__)
 

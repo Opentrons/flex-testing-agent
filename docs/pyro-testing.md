@@ -71,6 +71,19 @@ KansasFLEX SSH (lab key, not committed):
 ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST
 ```
 
+When the network is down or you need boot/kernel output, use the FTDI serial
+console instead of Tabby (close Tabby first; port is exclusive):
+
+```bash
+uv run flex-test serial list
+uv run flex-test serial shell
+uv run flex-test serial run "systemctl is-active opentrons-robot-server"
+```
+
+Harness + agent setup: [serial-console.md](serial-console.md).
+Hardware photos / orientation:
+[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
+
 Useful commands:
 
 ```bash

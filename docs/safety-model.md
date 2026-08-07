@@ -27,9 +27,21 @@ Harness policy:
 - Detect via GET only
 - Capability `enable_access_control` is unimplemented and blocked
 - Prefer thorough testing with CRS **off** first ([crs-testing.md](crs-testing.md))
+- Do **not** enable CRS from the harness until operators accept lockout risk and
+  know both restore paths below
 
-Future CRS-on testing requires a documented restore path (for example serial /
-lab wipe per EXEC-2176) before any enable capability is considered.
+### Restore paths when CRS is on
+
+1. **Remote-access carveout (QA, keeps CRS on):** FTDI serial remount + touch
+   `/etc/opentrons-allow-remote-access` + restart `opentrons-remote-access-allowed`
+   so SSH / Jupyter / devtools work again. Harness:
+   `ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access`.
+   Cleared on the next OS update. Details: [crs-testing.md](crs-testing.md).
+2. **Full CRS exit (turn CRS off):** EXEC-2176 / assisted wipe (not automated here).
+
+On edge / 10.0 alphas with remote-access disable: CRS off leaves SSH/Jupyter
+alone; CRS on disables them unless the allow file exists (auth-server check fails
+closed).
 
 ## Risk levels
 

@@ -38,6 +38,13 @@ Clients are independent of scenarios and agents. They raise explicit timeout/API
 
 `src/flex_testing_agent/releases/` fetches Flex robot OS `ot3-oe/releases.json` from the internal and external CDN hosts documented by Opentrons/robot-stack. It classifies **stable / alpha / beta** and maps bare manifest keys to stack tags (`ot3@…` internal, `v…` external). This is separate from robot mutation: it only reads public manifests. See [robot-versions.md](robot-versions.md).
 
+### Serial console (FTDI cable)
+
+`src/flex_testing_agent/serial_console/` talks to the Flex SOM serial header over a
+local USB FTDI adapter (not HTTP). CLI: `flex-test serial list|shell|run`. See
+[serial-console.md](serial-console.md). This sits beside HTTP clients and the
+release catalog as a lab debug transport (Tabby replacement).
+
 ### 2. Robot capabilities
 
 Capabilities in `src/flex_testing_agent/capabilities/` compose client calls into meaningful operations with:
@@ -97,7 +104,9 @@ CRS-off coverage is parameter-free GETs via `ReadonlyClient`.
 
 When CRS is enabled later, `RobotHttpSession` can attach an optional bearer
 token. This harness does not implement enablement (one-way API). CRS-on matrix
-testing waits on a restore path.
+testing waits on restore: serial **remote-access carveout** for SSH/Jupyter while
+CRS stays on (`flex-test serial allow-remote-access`), and EXEC-2176 wipe to turn
+CRS off. See [crs-testing.md](crs-testing.md).
 
 ## Future agent integration
 
@@ -106,5 +115,6 @@ Capability descriptors (`CapabilityDescriptor`) already carry name, description,
 ## Related operator docs
 
 - [Pyro / protocol-subprocess testing](pyro-testing.md) on internal Flex builds (SSH + HTTP suites; harness gaps)
+- [FTDI serial console](serial-console.md) (`flex-test serial`; Tabby alternative)
 - [Safety model](safety-model.md)
 - Published checklists: [test-suggestions/](test-suggestions/)

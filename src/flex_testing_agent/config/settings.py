@@ -73,6 +73,19 @@ class Settings(BaseSettings):
         default=None,
         description="Optional password for future access-control-on flows.",
     )
+    serial_port: str = Field(
+        default="",
+        description=(
+            "FTDI serial console device path (e.g. /dev/cu.usbserial-…). "
+            "Empty means auto-detect a likely Flex FTDI adapter."
+        ),
+    )
+    serial_baud_rate: int = Field(
+        default=115200,
+        ge=300,
+        le=4_000_000,
+        description="Serial console baud rate (Flex FTDI default: 115200).",
+    )
 
     @field_validator("log_level")
     @classmethod
