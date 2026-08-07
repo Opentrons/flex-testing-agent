@@ -28,8 +28,9 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Releases | `releases/` |
 | Flex facade | `robots/flex.py` |
 | Gates | `orchestration/gates.py` |
-| Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/pyro-testing.md` |
+| Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/pyro-testing.md`, `docs/serial-console.md` |
 | Pyro test plan | `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml` |
+| FTDI serial console | `serial_console/` + `flex-test serial` (Tabby alternative; not HTTP) |
 
 ## Extension rules
 
@@ -50,4 +51,5 @@ uv sync --all-extras
 make lint          # ruff + mypy (required after code changes)
 make test
 uv run flex-test inspect|probe|releases|put <version>
+uv run flex-test serial list|shell|run   # FTDI console; docs/serial-console.md
 ```

@@ -22,11 +22,13 @@ Implemented:
 
 - Typed configuration via environment / `.env`
 - Async clients: health, update, protocols/runs, camera, offsets, maintenance, etc.
-- CLI: `inspect`, `probe`, `releases`, `put`/`install`, `run-state`, `crs-off-b|c`, `api-suite`
+- CLI: `inspect`, `probe`, `releases`, `put`/`install`, `run-state`, `crs-off-b|c`, `api-suite`,
+  `serial` (FTDI console)
 - Known-state + seed history: `reset-data`, `known-state`, `seed-runs` (motion; gated)
 - SQLite persistence + Alembic migrations; evidence under `ARTIFACT_DIRECTORY`
 - Unit and mocked integration tests
 - Local reference clones under `upstream/` (gitignored): `opentrons`, `robot-stack`
+- FTDI USB serial console client (`flex-test serial`) as a Tabby alternative
 
 Not implemented yet:
 
@@ -82,6 +84,8 @@ See [.env.example](.env.example). Important keys:
 | `ALLOW_MUTATIONS` | Must stay `false` unless you intentionally allow mutations |
 | `DATABASE_URL` | Default SQLite under `./artifacts` |
 | `ARTIFACT_DIRECTORY` | Evidence and lock files |
+| `SERIAL_PORT` | Optional FTDI device path (empty = auto-detect) |
+| `SERIAL_BAUD_RATE` | Serial console baud (default `115200`) |
 
 Do not commit credentials.
 
@@ -142,6 +146,25 @@ uv run flex-test put 4.0.0-alpha.10 --channel internal
 This downloads the published `ot3-system.zip` for that version, uploads it through update-server (`/server/update/*`), commits, restarts, and verifies `system_version`.
 
 On internal Pyro builds, `/health` may return nginx **502** for several minutes after commit while firmware flashes and robot-server attaches to the nameserver. See [docs/pyro-testing.md](docs/pyro-testing.md).
+
+## FTDI serial console (no Tabby)
+
+Harness setup + agent rules: [docs/serial-console.md](docs/serial-console.md).
+Hardware photos / cable orientation:
+[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
+
+```bash
+uv run flex-test serial list
+uv run flex-test serial shell          # close Tabby first (port is exclusive)
+uv run flex-test serial run "systemctl is-active opentrons-robot-server"
+uv run flex-test serial remote-access-status
+ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
+```
+
+Defaults: **115200** baud, auto-detect FTDI / `usbserial`, prefer `/dev/cu.*` on macOS.
+CRS-on QA carveout (SSH/Jupyter while CRS stays on): [docs/crs-testing.md](docs/crs-testing.md).
+Setup: [docs/serial-console.md](docs/serial-console.md) and the
+[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
 
 ## Running robot integration tests
 

@@ -11,6 +11,9 @@ This harness talks to a **real** Flex (KansasFLEX). Follow `docs/safety-model.md
 
 - Mutations default **off** (`ALLOW_MUTATIONS=false`). Require explicit enablement for installs, camera enable, etc.
 - Never enable access control (`PATCH /auth/settings/accessControlEnabled` is one-way)
+- CRS-on QA remote-access carveout (SSH/Jupyter while CRS stays on): documented in
+  `docs/crs-testing.md`; CLI `flex-test serial allow-remote-access` requires
+  `ALLOW_MUTATIONS=true`. Does not disable CRS; EXEC-2176 wipe is separate.
 - Do **not** add first-class physical motion capabilities to the harness in this milestone
 - Live protocol **play** (homes / tip pickup) is allowed only when the user **explicitly** requests it, with deck preflight; prefer HTTP run actions and documented protocols under `docs/test-suggestions/protocols/`
 - Use exclusive robot lock for scenarios that touch the robot

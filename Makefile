@@ -17,6 +17,9 @@ format:
 test:
 	uv run pytest
 
+.PHONY: ci
+ci: lint test
+
 .PHONY: test-robot
 test-robot:
 	uv run pytest -m requires_robot

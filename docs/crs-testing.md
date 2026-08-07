@@ -157,9 +157,12 @@ Live CRS-off A+B+C on KansasFLEX (`v9.1.2-alpha.6`): Tier A 51/0, Tier B 35/0
 
 Prerequisites:
 
-1. Documented restore (lab SSH / serial wipe per EXEC-2176 / service procedure).
-2. Dedicated robot or accepted lockout risk (not casually KansasFLEX).
-3. OAuth client + role fixtures (Admin / User / Auditor / Service).
+1. Documented restore for **disabling** CRS (lab wipe per EXEC-2176 / service
+   procedure). The public API cannot turn CRS off.
+2. Documented **remote-access carveout** (below) so QA can still use SSH /
+   Jupyter / devtools while CRS stays on.
+3. Dedicated robot or accepted lockout risk (not casually KansasFLEX).
+4. OAuth client + role fixtures (Admin / User / Auditor / Service).
 
 Then for each catalog entry:
 
@@ -168,6 +171,69 @@ Then for each catalog entry:
 - token with required scope → success (or resource-specific 404)
 
 Still never implement a harness “enable CRS” happy path without restore.
+
+## CRS-on remote-access carveout (QA)
+
+Applies to robot builds on **edge** and **10.0 alphas** after the remote-access
+disable merge (product behavior; confirm on the build under test).
+
+| CRS state | Jupyter / SSH / devtools |
+|-----------|--------------------------|
+| Off | Unimpeded |
+| On | Disabled unless the allow sentinel exists |
+
+**Sentinel (read-only root FS):** `/etc/opentrons-allow-remote-access`  
+**Unit:** `opentrons-remote-access-allowed`
+
+Why this is a safe lab carveout:
+
+1. File lives on the read-only root filesystem; automation does not create it.
+2. Cleared / overridden on the next robot system update (must redo after `put`).
+3. Root-owned; protocol code cannot alter it.
+4. Remounting root RW is an explicit root hoop (serial console).
+5. Starts disabled; first enable needs serial (SSH is already locked out).
+
+Auth-server gate: “is CRS on?” is answered by the auth server. If auth does not
+respond correctly, remote access **fails closed** (no SSH/Jupyter). Jupyter/SSH
+may also come up a bit later after boot while that check runs.
+
+### Manual (serial / Tabby)
+
+After FTDI login as `root` ([serial-console.md](serial-console.md),
+[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex)):
+
+```bash
+mount -o remount,rw /
+touch /etc/opentrons-allow-remote-access
+systemctl restart opentrons-remote-access-allowed
+```
+
+One line:
+
+```bash
+mount -o remount,rw /; touch /etc/opentrons-allow-remote-access ; systemctl restart opentrons-remote-access-allowed
+```
+
+This restores SSH, Jupyter, and devtools. It does **not** turn CRS off. Redo
+after every robot OS update.
+
+### Harness CLI
+
+```bash
+# Close Tabby first (exclusive serial port)
+uv run flex-test serial remote-access-status
+ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
+```
+
+`allow-remote-access` is `DISRUPTIVE` (remounts `/` RW) and requires
+`ALLOW_MUTATIONS=true`. Prefer HTTP when network + CRS-off still work.
+
+### Not the same as EXEC-2176
+
+| Goal | Path |
+|------|------|
+| Keep CRS on, restore lab SSH/Jupyter/devtools | Serial allow-file carveout (this section) |
+| Turn CRS **off** again | EXEC-2176 / assisted wipe (not this harness) |
 
 ## Safety
 
@@ -193,14 +259,15 @@ Unchanged from [safety-model.md](safety-model.md):
    beyond the current 7 cleanup steps.
 5. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
 6. **OAuth + users clients**: prepare dual-mode session (no enable).
-7. **CRS-on authorization matrix**: after restore path; map to QA checklist sections
-   (login, roles, settings, logs).
+7. **CRS-on authorization matrix**: after remote-access carveout + EXEC-2176
+   restore story; map to QA checklist sections (login, roles, settings, logs).
 8. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
 
 ## Related harness docs
 
 - [architecture.md](architecture.md) (dual-mode AC note)
 - [safety-model.md](safety-model.md)
+- [serial-console.md](serial-console.md) (FTDI; used for allow-remote-access)
 - [source-research.md](source-research.md)
 - [development-plan.md](development-plan.md)
 - [pyro-testing.md](pyro-testing.md) (orthogonal; robot may be unhealthy while this lands)
