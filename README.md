@@ -171,6 +171,14 @@ Setup: [docs/serial-console.md](docs/serial-console.md) and the
 Audit vs diagnostic vs protocol run logs (and how they differ from FTDI
 transcripts): [docs/robot-logs.md](docs/robot-logs.md).
 
+```bash
+uv run flex-test logs list
+uv run flex-test logs archive   # ARTIFACT_DIRECTORY/logs/<stamp>-<host>/
+```
+
+After `seed-runs` / `api-suite` / install verification, agents should archive
+logs and review them (see operate-kansasflex skill).
+
 ## Running robot integration tests
 
 ```bash
