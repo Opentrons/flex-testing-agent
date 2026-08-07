@@ -5,8 +5,9 @@ description: >-
   and Python APIs. Use when inspecting robot state, probing read-only endpoints,
   taking camera pictures, listing Flex OS releases, installing a robot OS build
   with ALLOW_MUTATIONS, running Pyro / protocol-subprocess validation on
-  internal Flex builds, or using the FTDI serial console (`flex-test serial`)
-  instead of Tabby.
+  internal Flex builds, using the FTDI serial console (`flex-test serial`)
+  instead of Tabby, or archiving/reviewing diagnostic robot logs after
+  seed-runs / api-suite (`flex-test logs archive`).
 ---
 
 # Operate KansasFLEX
@@ -44,6 +45,11 @@ ALLOW_MUTATIONS=true uv run flex-test crs-off-c
 
 # Seed succeeded/paused/failed/LPC history for Tier B (physical motion)
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
+
+# After seed / api-suite / install verification: archive + review diagnostic logs
+uv run flex-test logs list
+uv run flex-test logs archive
+# Then complete Post-suite log archive and review (below)
 
 # Published Flex robot OS versions (CDN manifests)
 uv run flex-test releases
@@ -94,6 +100,50 @@ Chooser + definitions: [docs/robot-logs.md](../../docs/robot-logs.md).
 - **Protocol run**: command timeline for app/ODD run UI (may include source / RTP)
 
 Do not confuse those with FTDI harness tees in `artifacts/serial/`.
+
+```bash
+uv run flex-test logs list
+uv run flex-test logs archive
+```
+
+## Post-suite log archive and review
+
+**Required** after live `seed-runs`, `api-suite`, or install verification (and
+whenever the user asks to verify a build and file bugs on an RQA epic).
+
+1. Archive diagnostic logs:
+
+```bash
+uv run flex-test logs archive
+```
+
+2. Optionally note recent FTDI transcript paths under `artifacts/serial/` in the
+   review note. Do **not** treat harness FTDI tees as robot `serial.log`.
+3. Scan archived files for investigate signals:
+   - `ERROR`, `CRITICAL`, `Traceback`, `Exception`
+   - `Application startup failed`, `CommunicationError`
+   - Clustered nginx 502 / 5xx after `/health` has recovered
+   - Unexpected Pyro / `hardware-api` activity when
+     `enableHardwareSubprocess` / `enableProtocolSubprocess` are false
+4. Write `review.md` in the archive directory: clean vs suspects, file paths,
+   timestamps, robot version / host.
+5. If clear product defects and the user named a parent epic (for example
+   RQA-5819): create RQA **Bugs** with `parent` set to that epic. Otherwise
+   summarize in chat and/or an epic comment. Do not open noise bugs for expected
+   post-reboot 502 while firmware flashes.
+6. **Always attach log evidence to every bug filed from this review** (required):
+   1. Build a focused pack under the archive:
+      `evidence-<ISSUE_KEY>/` with the relevant excerpts (not necessarily the
+      full multi-MB `serial.log` / `can_bus.log`), plus `review.md` and
+      `manifest.json`, and zip it as `evidence-<ISSUE_KEY>.zip`.
+   2. Put that evidence on the Jira issue **before** considering the bug done:
+      - Prefer native Jira **file attachments** when available (UI upload or
+        REST with `JIRA_API_TOKEN` / email basic auth).
+      - If binary attach is unavailable (Atlassian MCP has no attachment API),
+        paste the focused excerpts into an issue **comment** (full traceback +
+        occurrence index) and note the local pack path / zip in that comment.
+   3. Never leave a log-review bug with only a summary and no log excerpts on
+      the ticket.
 
 ## Post-install recovery (internal / Pyro builds)
 

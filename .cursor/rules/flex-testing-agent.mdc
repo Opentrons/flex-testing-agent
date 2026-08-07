@@ -24,6 +24,7 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Health / update / auth detect | `clients/health.py`, `update_health.py`, `auth_settings.py` |
 | Read-only catalog + probe | `clients/readonly.py`, `capabilities/probe.py` |
 | Camera | `clients/camera.py` |
+| Diagnostic logs | `clients/logs.py`, `capabilities/archive_logs.py`, `flex-test logs` |
 | Install / update | `clients/update.py`, `capabilities/install.py` |
 | Releases | `releases/` |
 | Flex facade | `robots/flex.py` |
@@ -52,4 +53,5 @@ make lint          # ruff + mypy (required after code changes)
 make test
 uv run flex-test inspect|probe|releases|put <version>
 uv run flex-test serial list|shell|run   # FTDI console; docs/serial-console.md
+uv run flex-test logs list|archive       # diagnostic logs; docs/robot-logs.md
 ```

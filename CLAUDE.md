@@ -57,6 +57,7 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 | Install robot OS | `flex-test put\|install` / `capabilities/install.py` |
 | AC detect only | `clients/auth_settings.py` (never PATCH-enable) |
 | FTDI serial console | `flex-test serial` / `serial_console/` ([docs/serial-console.md](docs/serial-console.md)) |
+| Diagnostic logs archive | `flex-test logs list\|archive` / `clients/logs.py` ([docs/robot-logs.md](docs/robot-logs.md)) |
 
 Reference clones (gitignored):
 
@@ -94,6 +95,8 @@ uv run flex-test serial list
 uv run flex-test serial shell
 uv run flex-test serial remote-access-status
 ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
+# After seed / api-suite / install verification:
+uv run flex-test logs archive
 ```
 
 Operate against the robot via skill: `.cursor/skills/operate-kansasflex/SKILL.md`.

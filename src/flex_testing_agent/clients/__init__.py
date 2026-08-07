@@ -9,6 +9,7 @@ from flex_testing_agent.clients.error_recovery import ErrorRecoveryClient
 from flex_testing_agent.clients.errors import RobotApiError, RobotTimeoutError
 from flex_testing_agent.clients.health import HealthClient
 from flex_testing_agent.clients.labware_offsets import LabwareOffsetsClient
+from flex_testing_agent.clients.logs import LogsClient
 from flex_testing_agent.clients.maintenance_runs import MaintenanceRunsClient
 from flex_testing_agent.clients.modules import ModulesClient
 from flex_testing_agent.clients.protocols import ProtocolsClient
@@ -31,6 +32,7 @@ __all__ = [
     "ErrorRecoveryClient",
     "HealthClient",
     "LabwareOffsetsClient",
+    "LogsClient",
     "MaintenanceRunsClient",
     "ModulesClient",
     "ProtocolsClient",

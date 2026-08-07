@@ -89,8 +89,16 @@ around the fault? Any CAN / ODD noise correlating with a hang?
 
 **Harness notes:** Health payloads historically advertise paths like
 `/logs/api.log`, `/logs/serial.log`, `/logs/server.log`; catalog has
-`GET /logs/{log_identifier}`. Prefer typed clients when adding download
-helpers; keep under capabilities with risk gates.
+`GET /logs/{log_identifier}`. Download via:
+
+```bash
+uv run flex-test logs list
+uv run flex-test logs archive
+```
+
+Archives land under `ARTIFACT_DIRECTORY/logs/<UTC-stamp>-<host>/` with
+`manifest.json`. Soft-skips missing identifiers (404). Typed client:
+`clients/logs.py`; capability: `capabilities/archive_logs.py`.
 
 ## 3. Protocol run logs
 
@@ -121,8 +129,23 @@ package, even though audit periods embed a runlog when a protocol ran.
 | Pick the log family from the chooser table before fetching anything | Call every `/logs/*` and `/audit/*` path “the logs” interchangeably |
 | Assume audit packages exist only when CRS is on | Expect signed audit periods on CRS-off KansasFLEX by default |
 | Use diagnostic logs for support-style debugging | Treat protocol run command lists as a substitute for diagnostic dumps |
+| After live `seed-runs` / `api-suite` / install verification, run `flex-test logs archive` and review | Skip log archive after a verification pass that should feed an RQA epic |
+| Attach focused log evidence to every bug filed from the review | File log-review bugs with summary only and no excerpts on the ticket |
 | Save FTDI sessions to `artifacts/serial/` for boot / no-network cases | Invent parallel log download stacks outside clients → capabilities → CLI |
 | Cite this doc + PER Audit Logging when extending harness coverage | Enable CRS from the harness to “get audit logs” |
+
+### Post-suite archive and review (required)
+
+After `seed-runs`, `api-suite`, or install verification on KansasFLEX:
+
+1. `uv run flex-test logs archive`
+2. Note related FTDI paths under `artifacts/serial/` in the review (do not confuse with robot `serial.log`)
+3. Scan archived text for: `ERROR`, `CRITICAL`, `Traceback`, `Exception`, `Application startup failed`, `CommunicationError`, unexpected Pyro/hardware-api activity when subprocess flags are off, clustered 5xx after `/health` recovered
+4. Write `review.md` beside the archive (clean vs suspects, paths, timestamps)
+5. If clear product defects and the user named a parent epic: create RQA **Bugs** with that parent; otherwise summarize in chat / epic comment
+6. **Always attach evidence to each filed bug**: focused `evidence-<KEY>/` (+ zip) with excerpts, `review.md`, and `manifest.json`. Prefer Jira file attachments; if binary upload is unavailable, paste the focused excerpts into an issue comment and cite the local pack path. Do not leave log-review bugs without log text on the ticket.
+
+Full agent checklist: `.cursor/skills/operate-kansasflex/SKILL.md`.
 
 ## Related
 
