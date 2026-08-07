@@ -166,6 +166,11 @@ CRS-on QA carveout (SSH/Jupyter while CRS stays on): [docs/crs-testing.md](docs/
 Setup: [docs/serial-console.md](docs/serial-console.md) and the
 [Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
 
+## Robot logs
+
+Audit vs diagnostic vs protocol run logs (and how they differ from FTDI
+transcripts): [docs/robot-logs.md](docs/robot-logs.md).
+
 ## Running robot integration tests
 
 ```bash

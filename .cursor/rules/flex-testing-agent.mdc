@@ -28,7 +28,7 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Releases | `releases/` |
 | Flex facade | `robots/flex.py` |
 | Gates | `orchestration/gates.py` |
-| Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/pyro-testing.md`, `docs/serial-console.md` |
+| Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/pyro-testing.md`, `docs/serial-console.md`, `docs/robot-logs.md` |
 | Pyro test plan | `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml` |
 | FTDI serial console | `serial_console/` + `flex-test serial` (Tabby alternative; not HTTP) |
 

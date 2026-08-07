@@ -16,6 +16,7 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
 - [docs/pyro-testing.md](docs/pyro-testing.md) — Pyro5 / protocol-subprocess on internal Flex builds
 - [docs/serial-console.md](docs/serial-console.md) — FTDI console setup (humans + agents; Tabby alternative)
+- [docs/robot-logs.md](docs/robot-logs.md) — audit vs diagnostic vs protocol run logs
 - Cursor rules under [`.cursor/rules/`](.cursor/rules/)
 - Skills under [`.cursor/skills/`](.cursor/skills/) (`extend-flex-harness`, `operate-kansasflex`)
 
