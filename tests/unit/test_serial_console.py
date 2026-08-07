@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -191,13 +192,13 @@ def test_run_command_extracts_marker_body() -> None:
     def write_and_respond(data: bytes) -> int:
         n = original_write(data)
         text = data.decode("utf-8", errors="replace")
-        if "echo __FTA_CMD_" in text and "_END" in text:
-            # Parse marker from the command line we just wrote.
-            # Format: echo MARKER; cmd; echo MARKER_END
-            parts = text.split(";", 1)[0]
-            marker = parts.replace("echo ", "").strip()
+        normalized = text.replace("\r", "")
+        if "echo __FTA" in normalized and "_END__" in normalized:
+            parts = [p.strip() for p in normalized.split(";")]
+            start_tok = parts[0].removeprefix("echo ").strip()
+            end_tok = parts[-1].removeprefix("echo ").strip()
             transport.push(
-                f"{marker}\r\nactive\r\n{marker}_END\r\nroot@host:~# ".encode()
+                f"{start_tok}\r\nactive\r\n{end_tok}\r\nroot@host:~# ".encode()
             )
             written["cmd"] = text
         elif text in {"\r", "\n", "\r\n"}:
@@ -212,6 +213,86 @@ def test_run_command_extracts_marker_body() -> None:
         timeout=2.0,
     )
     assert "active" in out
+
+
+def test_run_command_tolerates_mid_line_cr_in_echo() -> None:
+    """Flex serial often inserts CR mid-line; markers must still match."""
+    from flex_testing_agent.serial_console.login import (
+        _extract_marked_body,
+        _normalize_serial_text,
+    )
+
+    mangled = (
+        "echo __FTA123__; hostname; echo __FTA12\r3_END__\n"
+        "__FTA123__\n"
+        "dfcdc4\n"
+        "__FTA123_END__\n"
+        "root@dfcdc4:~# "
+    )
+    text = _normalize_serial_text(mangled)
+    body = _extract_marked_body(text, "__FTA123__", "__FTA123_END__")
+    assert body is not None
+    assert "dfcdc4" in body
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("[    0.000000] Linux version 5.15", True),
+        ("[123.45] usb 1-1: new high-speed USB device", True),
+        ("Call Trace:", True),
+        ("Booting Linux on physical CPU 0x0", True),
+        ("root@dfcdc4:~# ", False),
+        ("active", False),
+        ("", False),
+    ],
+)
+def test_is_kernel_log_line(line: str, expected: bool) -> None:
+    from flex_testing_agent.serial_console.kernel_log import is_kernel_log_line
+
+    assert is_kernel_log_line(line) is expected
+
+
+def test_partition_and_run_strips_kernel_from_output() -> None:
+    from flex_testing_agent.serial_console.kernel_log import partition_console_text
+
+    text = "__FTA1__\nactive\n[  10.1] usb disconnect\n__FTA1_END__\n"
+    parts = partition_console_text(text)
+    assert parts.kernel_lines == ("[  10.1] usb disconnect",)
+    assert "active" in parts.other_text
+    assert "[  10.1]" not in parts.other_text
+
+
+def test_resolve_transcript_paths_default_on() -> None:
+    from flex_testing_agent.serial_console.transcript import (
+        resolve_transcript_paths,
+    )
+
+    per_run, daily = resolve_transcript_paths(
+        Path("/tmp/fta-artifacts"),
+        kind="run",
+        log_file=None,
+        save_log=True,
+    )
+    assert per_run is not None
+    assert per_run.name.endswith("-run.log")
+    assert daily is not None
+    assert daily.name.endswith("-console.log")
+
+
+def test_resolve_transcript_paths_opt_out() -> None:
+    from flex_testing_agent.serial_console.transcript import (
+        resolve_transcript_paths,
+    )
+
+    per_run, daily = resolve_transcript_paths(
+        Path("/tmp/fta-artifacts"),
+        kind="run",
+        log_file=None,
+        save_log=False,
+    )
+    assert per_run is None
+    assert daily is None
 
 
 def test_enable_remote_access_shell_uses_merged_paths() -> None:

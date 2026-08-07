@@ -73,6 +73,7 @@ DHCP loss, or SSH unreachable. **Close Tabby first** (port is exclusive).
 ```bash
 uv run flex-test serial list
 uv run flex-test serial shell
+uv run flex-test serial watch --seconds 30
 uv run flex-test serial run "systemctl is-active opentrons-robot-server"
 uv run flex-test serial remote-access-status
 ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
@@ -80,7 +81,19 @@ ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 
 CRS-on: `allow-remote-access` restores SSH/Jupyter/devtools via
 `/etc/opentrons-allow-remote-access` (does **not** turn CRS off; redo after OS
-update). Details: [docs/crs-testing.md](../../docs/crs-testing.md).
+update). Kernel printk on the FTDI console is expected and useful
+([docs/serial-console.md](../../docs/serial-console.md)). Details:
+[docs/crs-testing.md](../../docs/crs-testing.md).
+
+## Robot logs (audit / diagnostic / protocol run)
+
+Chooser + definitions: [docs/robot-logs.md](../../docs/robot-logs.md).
+
+- **Audit** (CRS on only): signed periods; who did what / who ran a protocol
+- **Diagnostic**: usual support logs (HTTP access, errors, robot-server / CAN / ODD, …)
+- **Protocol run**: command timeline for app/ODD run UI (may include source / RTP)
+
+Do not confuse those with FTDI harness tees in `artifacts/serial/`.
 
 ## Post-install recovery (internal / Pyro builds)
 

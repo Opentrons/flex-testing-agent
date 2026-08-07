@@ -116,5 +116,6 @@ Capability descriptors (`CapabilityDescriptor`) already carry name, description,
 
 - [Pyro / protocol-subprocess testing](pyro-testing.md) on internal Flex builds (SSH + HTTP suites; harness gaps)
 - [FTDI serial console](serial-console.md) (`flex-test serial`; Tabby alternative)
+- [Robot logs](robot-logs.md) (audit vs diagnostic vs protocol run logs)
 - [Safety model](safety-model.md)
 - Published checklists: [test-suggestions/](test-suggestions/)

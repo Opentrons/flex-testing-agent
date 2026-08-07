@@ -267,6 +267,7 @@ Unchanged from [safety-model.md](safety-model.md):
 
 - [architecture.md](architecture.md) (dual-mode AC note)
 - [safety-model.md](safety-model.md)
+- [robot-logs.md](robot-logs.md) (audit vs diagnostic vs protocol run logs)
 - [serial-console.md](serial-console.md) (FTDI; used for allow-remote-access)
 - [source-research.md](source-research.md)
 - [development-plan.md](development-plan.md)
