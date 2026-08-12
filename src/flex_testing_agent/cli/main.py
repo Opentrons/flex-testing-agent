@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from flex_testing_agent.cli.audit import audit_app
 from flex_testing_agent.cli.crs import crs_app
 from flex_testing_agent.cli.logs import logs_app
 from flex_testing_agent.cli.serial import serial_app
@@ -40,6 +41,7 @@ app = typer.Typer(
 )
 app.add_typer(serial_app, name="serial")
 app.add_typer(logs_app, name="logs")
+app.add_typer(audit_app, name="audit")
 app.add_typer(crs_app, name="crs")
 console = Console()
 log = get_logger(__name__)
@@ -230,6 +232,145 @@ def inspect_command(
                 console.print(f"  - {err}")
         console.print(f"[dim]Scenario: {metadata.name}[/dim]")
         return 0 if snapshot.connectivity else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("status")
+def status_command() -> None:
+    """Show health, instruments, door, and subsystems via typed clients."""
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.robot_status import robot_status
+        from flex_testing_agent.orchestration.crs_auth import optional_access_token
+        from flex_testing_agent.orchestration.lock import RobotOperationLock
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        host = resolved.require_robot_host()
+        artifact_root = resolved.ensure_artifact_directory()
+        try:
+            token = await optional_access_token(resolved)
+            with RobotOperationLock(host, artifact_root / "locks"):
+                async with FlexRobot(resolved, access_token=token) as robot:
+                    summary = await robot_status(robot)
+        except Exception as exc:
+            log.exception("status_failed")
+            console.print(f"[red]Status failed: {exc}[/red]")
+            return 1
+
+        table = Table(title="Flex Status")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Robot name", summary.name or "n/a")
+        table.add_row("Host", summary.host)
+        table.add_row("System version", summary.system_version or "n/a")
+        table.add_row("API version", summary.api_version or "n/a")
+        table.add_row(
+            "Access control",
+            (
+                "enabled"
+                if summary.access_control_enabled is True
+                else "disabled"
+                if summary.access_control_enabled is False
+                else "unknown"
+            ),
+        )
+        door_data = summary.door.get("data") if isinstance(summary.door, dict) else None
+        if isinstance(door_data, dict):
+            table.add_row("Door", str(door_data.get("status") or door_data))
+        else:
+            table.add_row("Door", _compact(summary.door) or "n/a")
+        instrument_bits: list[str] = []
+        for item in summary.instruments:
+            mount = item.get("mount")
+            raw_data = item.get("data")
+            data: dict[str, object] = raw_data if isinstance(raw_data, dict) else {}
+            name = data.get("instrumentName") or item.get("instrumentName") or "?"
+            instrument_bits.append(f"{mount}={name}")
+        table.add_row("Instruments", ", ".join(instrument_bits) or "none")
+        subsystem_bits: list[str] = []
+        for item in summary.subsystems:
+            subsystem_bits.append(
+                f"{item.get('name') or item.get('subsystem')}={item.get('ok')}"
+            )
+        table.add_row("Subsystems", ", ".join(subsystem_bits) or "none")
+        if summary.errors:
+            table.add_row("Errors", "; ".join(summary.errors))
+        console.print(table)
+        return 1 if summary.errors and summary.system_version is None else 0
+
+    raise SystemExit(asyncio.run(_run()))
+
+
+@app.command("wait-health")
+def wait_health_command(
+    timeout: float = typer.Option(
+        900.0,
+        "--timeout",
+        help="Seconds to wait for GET /health 200.",
+    ),
+    interval: float = typer.Option(
+        5.0,
+        "--interval",
+        help="Poll interval in seconds.",
+    ),
+) -> None:
+    """Poll until robot-server /health is 200 (post-install / reboot)."""
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.wait_health import wait_for_health
+        from flex_testing_agent.orchestration.crs_auth import optional_access_token
+        from flex_testing_agent.orchestration.lock import RobotOperationLock
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        host = resolved.require_robot_host()
+        artifact_root = resolved.ensure_artifact_directory()
+        try:
+            token = await optional_access_token(resolved)
+            with RobotOperationLock(host, artifact_root / "locks"):
+                async with FlexRobot(resolved, access_token=token) as robot:
+                    result = await wait_for_health(
+                        robot,
+                        timeout_seconds=timeout,
+                        poll_interval_seconds=interval,
+                    )
+        except Exception as exc:
+            log.exception("wait_health_failed")
+            console.print(f"[red]wait-health failed: {exc}[/red]")
+            return 1
+
+        table = Table(title="Wait Health")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Healthy", "yes" if result.healthy else "no")
+        table.add_row("Elapsed (s)", f"{result.elapsed_seconds:.1f}")
+        table.add_row("Polls", str(result.polls))
+        table.add_row("System version", result.system_version or "n/a")
+        table.add_row("API version", result.api_version or "n/a")
+        table.add_row("Update-server version", result.update_system_version or "n/a")
+        table.add_row("Detail", result.detail)
+        if result.last_error:
+            table.add_row("Last error", result.last_error)
+        console.print(table)
+        return 0 if result.healthy else 1
 
     raise SystemExit(asyncio.run(_run()))
 

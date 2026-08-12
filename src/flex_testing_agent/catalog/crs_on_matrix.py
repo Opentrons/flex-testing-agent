@@ -19,6 +19,7 @@ def endpoints_for_crs_on_auth_matrix() -> tuple[EndpointSpec, ...]:
 
 
 # Scope sets by account type (mirrors auth-server ``ACCOUNT_TYPE_TO_SCOPES``).
+# Used for mutation lockdown expectations; GET routes are not CRS-gated.
 ACCOUNT_SCOPE_NAMES: dict[str, frozenset[str]] = {
     "admin": frozenset(
         {

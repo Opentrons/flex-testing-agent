@@ -1,38 +1,71 @@
 # Pyro / protocol-subprocess testing on KansasFLEX
 
 Operator and agent guide for validating **Pyro5** inter-process communication
-(IPC) on Flex internal builds where hardware and protocol subprocesses are
-enabled by default.
+(IPC) on Flex builds where hardware and protocol subprocesses are enabled by
+default.
 
-Published checklist form: [test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml](test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml)
-(`make pages`). Spec background:
+Published checklist form:
+[test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml](test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml)
+(`make pages`). Release-delta plan for the next external alpha:
+[test-suggestions/10.0.0-alpha.1-release-delta.yaml](test-suggestions/10.0.0-alpha.1-release-delta.yaml)
+(fixes on `chore_release-10.0.0` since `v10.0.0-alpha.0`). Historical checklist
+from the internal line:
+[test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml](test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml).
+Spec background:
 [Subprocess and Python-Remote Objects Specification](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5839652323/Subprocess+and+Python-Remote+Objects+Specification)
-(PER). Epic for alpha.10 findings: [RQA-5786](https://opentrons.atlassian.net/browse/RQA-5786).
+(PER).
+
+Bug epic for `10.0.0-alpha.0`: [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831).
+Bug epic for `10.0.0-alpha.1`: [RQA-5847](https://opentrons.atlassian.net/browse/RQA-5847)
+(both under initiative [RQA-5484](https://opentrons.atlassian.net/browse/RQA-5484)).
+Triage / priority SSOT (Pyro-centered):
+[10.0.0-alpha.1 triaging/organizing tickets](https://opentrons.atlassian.net/wiki/spaces/RBARM/pages/6405062721/10.0.0-alpha.0+triaging+organizing+tickets)
+(RBARM). Earlier internal-line findings: [RQA-5786](https://opentrons.atlassian.net/browse/RQA-5786).
+
+### Filing / retest rule
+
+Before opening a new RQA Bug under RQA-5847 (or any 10.0.0 epic): search open
+tickets on the triage page and related epics (`RQA-5831`, `RQA-5786`, Runs /
+Hardware / Graceful shutdown buckets). If a match exists, **comment with
+evidence** on that ticket (and link related keys). File a new Bug only when
+there is no existing match.
 
 ## When this applies
 
 | Signal | Value |
 |--------|--------|
-| Channel | **internal** (`ot3@…` stack tags) |
-| Example robot OS | `4.0.0-alpha.10` / `ot3@4.0.0-alpha.10` |
-| Feature flags | `enableHardwareSubprocess=true`, `enableProtocolSubprocess=true` (default on since ~`ot3@4.0.0-alpha.7`) |
+| Channel | **external** (`v10.0.0-alpha.N` stack tags) |
+| Example robot OS | `10.0.0-alpha.1` / `v10.0.0-alpha.1` (prior: `10.0.0-alpha.0`) |
+| Feature flags | `enableHardwareSubprocess=true`, `enableProtocolSubprocess=true` |
 | Flag file | `/data/feature_flags.json` |
 
-External customer builds (for example `v9.1.x`) are a different stack. Do not
-assume Pyro subprocess mode there unless flags and systemd units prove it.
+### Version line rename (important)
+
+The Pyro / protocol-subprocess Flex OS line that used to ship as **internal**
+`4.0.0-alpha.N` / `ot3@4.0.0-alpha.N` is the **same product line** now published
+on the **external** channel as `10.0.0-alpha.N` / `v10.0.0-alpha.N`.
+
+| Former (internal) | Current (external) |
+|-------------------|--------------------|
+| `4.0.0-alpha.N` | `10.0.0-alpha.N` |
+| `ot3@4.0.0-alpha.N` | `v10.0.0-alpha.N` |
+| `--channel internal` | `--channel external` |
+
+Do not assume older customer `v9.1.x` builds have Pyro subprocess mode unless
+flags and systemd units prove it. See [robot-versions.md](robot-versions.md).
 
 Install example:
 
 ```bash
 # Confirm host first: DHCP can move KansasFLEX (seen 192.168.0.20 → .21)
 uv run flex-test inspect
-ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.1 --channel external
 ```
 
 After put/reboot, update-server may report the new version while `/health` is
 still nginx **502** for several minutes (firmware flash + robot-server Pyro
-startup). Prefer waiting for `/health` 200, or SSH and check services (below).
-See [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787).
+startup). Prefer waiting for `/health` 200, or SSH/serial and check services
+(below). See [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787).
 
 ## Process layout
 
@@ -54,10 +87,16 @@ Well-known nameserver entries:
 |------|--------|
 | `OT3API` | `opentrons-hardware-api` (`pyro_process_entry`) |
 | `robot-server-resource` | robot-server |
-| `ot-protocol` | current run process (when current) |
-| `ot-simulating-protocol` | analysis / simulating companion (when present) |
+| `ot-protocol` / `ot-protocol_<uuid>` | current run process (when current; UUID suffix seen on `v10.0.0-alpha.0`) |
+| `ot-simulating-protocol` / `ot-simulating-protocol_<uuid>` | analysis / simulating companion (when present) |
 
-Monorepo pointers (research clone `upstream/opentrons`, tag `ot3@4.0.0-alpha.10`):
+On CRS-on robots, uncurrenting a run may return **409 `RunSignoffRequired`**
+until the run is signed off. That is access-control behavior, not a Pyro IPC
+failure. Prefer CRS-off (or a signed-off run) when validating process teardown
+([RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)).
+
+Monorepo pointers (research clone `upstream/opentrons`, tag `v10.0.0-alpha.0`
+or matching `ot3@` archaeology tag):
 
 - Hardware entry: `api/src/opentrons/hardware_control/pyro_utils/pyro_process_entry.py`
 - Adapters: `api/src/opentrons/util/pyro/`
@@ -118,122 +157,141 @@ Notes:
   expected for raw clients. Product paths go through robot-server HTTP (registry applied).
 - Writing under `/root/.opentrons` may hit read-only FS when registering types from SSH.
 
-## Suite map (A–D)
+## Recovery: full robot reboot (preferred)
 
-Run in this order. Record results in the YAML under `docs/test-suggestions/`.
+When the robot is unhealthy after an OS update, IPC glitch, or HTTP 5xx that
+persists past firmware flash, **prefer a full robot reboot** (power cycle or
+`reboot` from root SSH / serial). Then wait for `GET /health` → 200.
 
-### Results rollup (KansasFLEX, 2026-07-31 → 2026-08-03, `ot3@4.0.0-alpha.10`)
+Do **not** treat ordered `systemctl restart` of
+`opentrons-pyro-nameserver` / `opentrons-hardware-api` / `opentrons-robot-server`
+as the default recovery path in operator notes or RQA bugs.
+
+### Why we stopped recommending service restart
+
+Partial service restarts were useful for **forcing** known IPC failure modes
+during early validation, but:
+
+1. Dev guidance (2026-08): nameserver / producer **re-register after service
+   restart** gaps are **low priority and expected** for now (may be fixed later).
+   Tracked historically as [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789)
+   and [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) (priority Low).
+2. Full reboot is what operators and support should do; bugs should say that.
+3. Skipping service-restart experiments avoids filing noise that looks like
+   day-to-day product defects.
+
+Optional deep-dive (not required for each alpha): still fine to reproduce
+RQA-5789/5790 deliberately for regression once a fix lands. Do not block
+`10.0.0-alpha.*` validation on those cases.
+
+### Post-install wait (before declaring broken)
+
+If `/health` is 502/500 but update-server shows the new version:
+
+`flex-test put` treats matching `GET /server/update/health` `systemVersion` as
+OS install success (`boot.health`) even while robot-server `/health` is still
+failing (common: `DatabaseFailedToInitialize` / device busy during FW flash).
+
+1. Wait several minutes for firmware flash + robot-server attach.
+2. SSH/serial: confirm nameserver + hardware-api + robot-server active; `OT3API`
+   present in the nameserver.
+3. If still broken after FW idle: **full robot reboot**, then wait for `/health`
+   200 again.
+
+## Filing RQA bugs (developers are the audience)
+
+Parent new findings under [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831)
+unless another epic is named.
+
+Write bugs in **general product language**:
+
+| Do | Do not |
+|----|--------|
+| HTTP paths (`GET /health`, `GET /runs/{id}/commands`) | Harness suite IDs (`A4`, `C6`, `D5b`) |
+| ODD / App / robot OS symptoms operators see | `flex-test probe`, `api-suite`, CRS-off A/B/C |
+| systemd unit names if SSH evidence matters | Internal harness vocab (`seed-runs`, Tier B, …) |
+| Robot serial, build (`v10.0.0-alpha.0`), timestamps | Assuming readers know this repo |
+| **Full robot reboot** as recovery / workaround | “Restart nameserver then hardware-api then robot-server” as the prescribed fix |
+
+Attach focused log evidence (see operate skill / [robot-logs.md](robot-logs.md)).
+
+## Validation map (product checks)
+
+Run these against KansasFLEX after install. Record results in the YAML under
+`docs/test-suggestions/`. Letter IDs below are **harness bookkeeping only**;
+do not paste them into Jira summaries.
+
+### Historical rollup (KansasFLEX, 2026-07-31 → 2026-08-03, internal `ot3@4.0.0-alpha.10`)
+
+Kept for archaeology. Re-run on `v10.0.0-alpha.0` and update the new YAML.
 
 | ID | Result | Notes |
 |----|--------|-------|
 | A1 | **PASS** | nameserver, hardware-api, robot-server active+enabled |
 | A2 | **PASS** | `OT3API` in NS ~0.05s; `get_fw_version` → `72` |
 | A3 | **PASS** | `/health` 200; instruments/subsystems via HW proxy |
-| A4 | **FAIL** | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) NS restart, no re-register |
-| A5 | **FAIL** | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) HW restart, stale RS proxy |
+| A4 | **FAIL** (Low / expected) | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) NS restart, no re-register |
+| A5 | **FAIL** (Low / expected) | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) HW restart, stale RS proxy |
 | B1 | **PASS** | `/instruments` + `/subsystems/status` healthy |
 | B2 | **SKIP** | no modules attached |
-| B3 | **PASS** | two door open/close cycles on `/robot/door/status`; HW logs matched |
+| B3 | **PASS** | two door open/close cycles on `/robot/door/status` |
 | C1 | **PASS** | create run → `ot-protocol` in NS + `run_process_entry_point` |
 | C2 | **PASS** | upload + analysis `completed` / `result=ok` |
-| C3a | **PASS** | idle pause → 409 (expected); idle stop → 201/`stopped`; `cancel` not a valid `actionType` |
-| C3b | **PASS** | live tip smoke play succeeded (home, loadLabware, loadPipette, pickUpTip, dropTip) |
+| C3a | **PASS** | idle pause → 409; idle stop → 201/`stopped` |
+| C3b | **PASS** | live tip smoke play succeeded |
 | C6 | **FAIL** | [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) uncurrent clears NS name, processes remain |
-| D1 | **PASS** | door HTTP `closed` |
-| D2 | **PASS** | `DoorState.CLOSED` via Proxy after `register_hardware_types()` (`HOME=/tmp/…`) |
-| D3 | **PASS** | `attached_instruments` → `Mount` keys + pipette dicts with registry |
-| D4 | **PASS** | `/runs/{id}/currentState` keys (`tipStates`, `estopEngaged`, …) |
-| D4b | **FAIL** | [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) legacy StateSummary load |
-| D5a | **PASS** | idle run commands list OK (empty); analysis command slices OK |
-| D5b | **FAIL** | [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) succeeded tip smoke `/commands` empty |
-| D6 | **PASS** | invalid mount → HTTP `InvalidRequest` / `4000` |
-| D7 | **PASS** | `/subsystems/status` 6 subsystems `ok=true` (RQA-5788 not reproducing now) |
-| D8 | **PASS** | raw Proxy: `SerializeError` on `DoorState` / `NonBuiltinKeyDictWrapper` (expected) |
-
-Passing (A–D): **A1–A3, B1, B3, C1–C3b, D1–D4, D5a, D6–D8** (18). Skipped: B2. Failed: A4, A5, C6, D4b, D5b.
+| D1–D4, D5a, D6–D8 | **PASS** / expected negative | see historical YAML |
+| D4b | **FAIL** | [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) |
+| D5b | **FAIL** (Closed) | [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) |
 
 ### A. Process / service health
 
-| ID | Intent | Validated 2026-07-31 |
-|----|--------|----------------------|
-| A1 | Three systemd units active | **PASS** |
-| A2 | `OT3API` in nameserver quickly | **PASS** |
-| A3 | `/health` OK with HW proxy usable | **PASS** |
-| A4 | Restart **nameserver alone** → re-register or fail clearly | **FAIL** [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) |
-| A5 | Restart **hardware-api** → robot-server reattaches | **FAIL** [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) |
-
-A4 observation: NS comes back empty of app names; services stay active; `/health`
-can stay 200 on stale sockets. Recovery: restart hardware-api then robot-server
-(or full ordered restart: nameserver → hardware-api → robot-server).
-
-A5 observation: new `OT3API` URI registers; robot-server keeps old proxy → HTTP 500
-`CommunicationError` until robot-server restart.
+| ID | Intent | Notes for 10.0.0-alpha.* |
+|----|--------|---------------------------|
+| A1 | Three systemd units active | Required each build |
+| A2 | `OT3API` in nameserver quickly | Required |
+| A3 | `/health` OK with HW proxy usable | Required |
+| A4 | Restart **nameserver alone** | **Skip by default** (Low / expected; RQA-5789) |
+| A5 | Restart **hardware-api** alone | **Skip by default** (Low / expected; RQA-5790) |
 
 ### B. Hardware IPC (lower line)
 
-| ID | Intent | Validated 2026-07-31 |
-|----|--------|----------------------|
-| B1 | Instruments + subsystems via HTTP | **PASS** |
-| B2 | Modules / nested proxies | **SKIP** (no modules attached) |
-| B3 | Door open/close via `/robot/door/status` | **PASS** (two cycles; HW `DoorSwitchStateInfo` matched) |
-
-Door lives on `/robot/door/status`, not `/runs/{id}/currentState`.
+| ID | Intent |
+|----|--------|
+| B1 | Instruments + subsystems via HTTP |
+| B2 | Modules / nested proxies (skip if no modules) |
+| B3 | Door open/close via `/robot/door/status` |
 
 ### C. Protocol subprocess (upper line)
 
-| ID | Intent | Validated 2026-07-31 |
-|----|--------|----------------------|
-| C1 | Create current run → `ot-protocol` in NS + process | **PASS** |
-| C2 | Upload + analyze Python protocol | **PASS** |
-| C3a | Idle run actions (pause/stop/cancel contract) | **PASS** (pause 409; stop 201; cancel invalid) |
-| C3b | Live tip smoke play across process boundary | **PASS** (run succeeded; tiprack A1, right P50) |
-| C6 | Uncurrent tears down process | **FAIL** [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791): NS name cleared, `run_process_entry_point` processes remain |
+| ID | Intent |
+|----|--------|
+| C1 | Create current run → `ot-protocol` in NS + process |
+| C2 | Upload + analyze Python protocol |
+| C3a | Idle run actions (pause/stop contract) |
+| C3b | Live tip smoke play (only with explicit operator request) |
+| C6 | Uncurrent tears down process ([RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)) |
 
-Sample no-motion protocol (analysis only) and live tip smoke protocol:
-[protocols/](test-suggestions/protocols/).
+Sample protocols: [protocols/](test-suggestions/protocols/).
 
-### D. Serialization (high bug density)
+### D. Serialization
 
-Concrete cases (product path = robot-server HTTP or on-robot Proxy **after**
-`register_hardware_types()` / robot-server registry). Raw Proxy without registry
-is a negative control only.
+Prefer robot-server HTTP (or on-robot Proxy after `register_hardware_types()`).
+Raw Proxy without registry is a negative control only.
 
-| ID | Intent | Validated 2026-07-31 |
-|----|--------|----------------------|
-| D1 | Door enum via HTTP `/robot/door/status` | **PASS** (`closed`) |
-| D2 | DoorState via on-robot OT3API Proxy **with** hardware type registry | **PASS** (`DoorState.CLOSED`) |
-| D3 | `attached_instruments` / NonBuiltinKeyDictWrapper with registry | **PASS** (LEFT/RIGHT Mount → pipette dicts) |
-| D4 | Run `currentState` / StateSummary-shaped payload via HTTP | **PASS** |
-| D4b | Legacy persisted StateSummary still loads | **FAIL** [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) |
-| D5a | Analysis / idle-run command slices via HTTP | **PASS** (analysis has `home`/`comment`) |
-| D5b | Succeeded tip-smoke run command history via HTTP | **FAIL** [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) `totalLength=0` |
-| D6 | Invalid request / error surface via HTTP | **PASS** (`InvalidRequest` on bad mount) |
-| D7 | `/subsystems/status` healthy now (RQA-5788 regression check) | **PASS** (6 subsystems ok) |
-| D8 | Negative: raw Proxy without registry fails specialty types | **PASS** (expected SerializeError) |
-
-On-robot registry tip: `import opentrons…` as root needs a writable home
-(`HOME=/tmp/ot-home` or similar). `/root/.opentrons` is often read-only over SSH.
-
-Also watch journals for `unhashable type: 'dict'` / `numpy.float64`
-([RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788),
-[RQA-5582](https://opentrons.atlassian.net/browse/RQA-5582)). Full pipette FW
-reflash for the numpy path is optional / destructive; skip unless operator
-requests. Helper script: `scripts/run_pyro_d_suite.sh`.
+On-robot registry tip: use writable `HOME=/tmp/ot-home`. `/root/.opentrons` is
+often read-only over SSH. Helper: `scripts/run_pyro_d_suite.sh`.
 
 ## Live tip smoke (physical motion)
 
 Requires **explicit operator request** and clear deck setup. Play homes the robot.
 
-Validated setup on KansasFLEX (2026-07-31):
+Typical KansasFLEX setup:
 
 - Right: `p50_single_flex`
-- Left: `p50_multi_flex` (unused)
 - Deck: `opentrons_flex_96_filtertiprack_50ul` in **A1**, rest clear
 - Door closed, estop disengaged
 - Protocol: [protocols/pyro_live_p50_tip_smoke.py](test-suggestions/protocols/pyro_live_p50_tip_smoke.py)
-- Result: run `1c4e5cce-…` `succeeded` (summary shows pipette + tiprack A1). Note:
-  `GET /runs/{id}/commands` later returned empty ([RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796));
-  treat live observation during play as the C3b pass evidence, not post-hoc command listing.
 
 HTTP sketch:
 
@@ -248,41 +306,25 @@ curl -sS -H 'Opentrons-Version: *' -H 'Content-Type: application/json' \
   http://$ROBOT_HOST:31950/runs/$RUN_ID/actions
 ```
 
-Pitfall: never write id files as `PROTO_ID=<uuid>` then `cat` them back into JSON.
-Store **bare UUIDs** only (`printf '%s' "$PROTO_ID" > file`). A `PROTO_ID=` prefix
-caused create-run `ProtocolNotFound` and play `404` (false “did not play”).
+Pitfall: store **bare UUIDs** only in id files. Prefer `return_tip` when no trash
+bin is loaded.
 
-Prefer `return_tip` / tiprack return when no trash bin is loaded.
+## Bugs from the internal alpha.10 line (under RQA-5786)
 
-## Post-install recovery cheat sheet
+Many are assigned; several Closed. Keep linking when regressing on `10.0.0-alpha.*`.
 
-If `/health` is 502/500 but update-server shows the new version:
+| Key | Summary | Notes |
+|-----|---------|-------|
+| [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787) | robot-server startup / nginx 502 after update during HW firmware flash | Highest; Casey |
+| [RQA-5808](https://opentrons.atlassian.net/browse/RQA-5808) | `/health` 500 `DatabaseFailedToInitialize` (EBUSY) | Tamar |
+| [RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788) | `unhashable type: 'dict'` on subsystem updates | Closed |
+| [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register | **Low / expected** |
+| [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart | **Low / expected** |
+| [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) | Uncurrent clears NS `ot-protocol` but leaves processes | High; Casey |
+| [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) | Succeeded runs return empty `/runs/{id}/commands` | Closed |
+| [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) | Legacy StateSummary missing camera field | Josh |
 
-`flex-test put` treats matching `GET /server/update/health` `systemVersion` as
-OS install success (`boot.health`) even while robot-server `/health` is still
-failing (common: `DatabaseFailedToInitialize` / device busy during FW flash).
-
-1. SSH: confirm nameserver + hardware-api + robot-server active.
-2. Confirm `OT3API` in NS; watch hardware-api for firmware `Update: … %`.
-3. After FW idle: `systemctl restart opentrons-robot-server`.
-4. If still broken: restart in order  
-   `opentrons-pyro-nameserver` → `opentrons-hardware-api` → wait for `OT3API` →  
-   `opentrons-robot-server`.
-
-## Bugs filed from KansasFLEX alpha.10 (under RQA-5786)
-
-| Key | Summary |
-|-----|---------|
-| [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787) | robot-server startup / nginx 502 after update during HW firmware flash |
-| [RQA-5808](https://opentrons.atlassian.net/browse/RQA-5808) | `/health` 500 `DatabaseFailedToInitialize` (Errno 16 EBUSY on robot-server DB dir) after 9.1.2→alpha.10; HW endpoints still 200 |
-| [RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788) | `unhashable type: 'dict'` on subsystem updates via OT3API proxy |
-| [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register |
-| [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart |
-| [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) | Uncurrent clears NS `ot-protocol` but leaves processes running |
-| [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) | Succeeded runs return empty `/runs/{id}/commands` (`totalLength=0`) |
-| [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) | Legacy StateSummary missing `cameraSettings.errorRecoveryCameraEnabled` |
-
-Related prior: [RQA-5582](https://opentrons.atlassian.net/browse/RQA-5582) (numpy float64 pyro), [EXEC-2187](https://opentrons.atlassian.net/browse/EXEC-2187).
+Related prior: [RQA-5582](https://opentrons.atlassian.net/browse/RQA-5582), [EXEC-2187](https://opentrons.atlassian.net/browse/EXEC-2187).
 
 ## Harness gaps (future work)
 

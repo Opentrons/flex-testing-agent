@@ -1045,3 +1045,29 @@ async def _execute_tier_c(
     )
     robot.raw_evidence[evidence_key] = summary.model_dump(mode="json")
     return summary
+
+
+async def gather_tier_b_fixtures(
+    robot: FlexRobot,
+    *,
+    create_if_missing: bool,
+    protocol_path: Path | None = None,
+    preferred_run_id: str | None = None,
+    auth_username: str | None = None,
+) -> _Fixtures:
+    """Shared Tier B fixture IDs for parameterized CRS probes (on or off)."""
+    smoke = protocol_path or DEFAULT_SMOKE_PROTOCOL
+    fixtures = await _gather_fixtures(
+        robot,
+        create_if_missing=create_if_missing,
+        protocol_path=smoke,
+        preferred_run_id=preferred_run_id,
+    )
+    if auth_username is not None:
+        fixtures.username = auth_username
+    return fixtures
+
+
+def resolve_tier_b_path(template: str, fixtures: _Fixtures) -> str | None:
+    """Substitute Tier B path params using gathered fixture IDs."""
+    return _resolve_path(template, fixtures)

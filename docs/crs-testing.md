@@ -238,9 +238,15 @@ Prerequisites:
 
 Then for each catalog entry:
 
-- unauthenticated → expect 401/403 (except truly public routes)
-- token without required scope → 403
-- token with required scope → success (or resource-specific 404)
+- unauthenticated **GET** → expect success (CRS does not gate reads)
+- unauthenticated **POST/PATCH/PUT/DELETE** → expect 401/403 (except public routes)
+- token without required scope on **mutations** → 403
+- token with required scope on mutations → success (or resource-specific 404)
+
+**Harness:** `flex-test crs lockdown` (negative auth, bad credentials; excludes
+DISRUPTIVE+ routes so probes never reboot or reconfigure the robot) plus
+`flex-test crs auth-matrix` (scoped GET allow/deny with valid role tokens). See [crs-on-setup.md](crs-on-setup.md) and
+`docs/test-suggestions/crs-on-lockdown-negative-auth.yaml`.
 
 Still never implement a harness “enable CRS” happy path without restore.
 
@@ -335,7 +341,14 @@ Unchanged from [safety-model.md](safety-model.md):
 7. **CRS-on authorization matrix**: after remote-access carveout + disable path;
    map to QA checklist sections (login, roles, settings, logs). Bootstrap:
    [crs-on-setup.md](crs-on-setup.md).
-8. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
+8. **Auth settings behavior suite**: per-field and combination coverage for
+   `GET/PATCH /auth/settings` (`maxNumberOfLoginAttempts`, password complexity,
+   `idleLogout`, `requireAdminCreds*`). Test plan:
+   [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml)
+   (maps QA checklist §8). Harness: `flex-test crs settings-suite` with
+   snapshot/restore defaults; reuse `crs user-management` ephemeral users for
+   login-attempt cases.
+9. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
 
 ## Related harness docs
 

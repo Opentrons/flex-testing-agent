@@ -89,7 +89,9 @@ ALLOW_MUTATIONS=true uv run flex-test api-suite
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
 ALLOW_MUTATIONS=true uv run flex-test put <version>
 # Internal / Pyro stack:
-ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external
+# Internal archaeology (prefer external 10.0.0-alpha.* going forward):
+# ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
 # FTDI serial console (Tabby alternative; close Tabby first if port busy):
 uv run flex-test serial list
 uv run flex-test serial shell
@@ -100,4 +102,8 @@ uv run flex-test logs archive
 ```
 
 Operate against the robot via skill: `.cursor/skills/operate-kansasflex/SKILL.md`.
-Pyro validation checklist: `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml`.
+**Never curl the robot**; use `flex-test` / clients, or extend the harness
+(`.cursor/skills/extend-flex-harness/SKILL.md`).
+Pyro validation checklist: `docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml`
+(historical: `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml`).
+Bug epic: [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831).

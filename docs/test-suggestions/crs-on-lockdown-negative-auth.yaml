@@ -1,0 +1,82 @@
+id: crs-on-lockdown-negative-auth
+title: CRS-on lockdown negative auth suite
+summary: >
+  Verify Flex HTTP APIs reject unauthenticated, invalid-bearer, and under-scoped
+  callers on mutating requests when access control is enabled. GET routes must
+  remain reachable with or without credentials. Complements flex-test crs
+  auth-matrix with full-method coverage and bad-credential probes. File bugs
+  under RQA-5847.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test crs lockdown
+    - uv run flex-test crs lockdown --include-parameterized
+    - uv run flex-test crs lockdown --strict-only --show-failures
+    - uv run flex-test crs auth-matrix
+    - ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --actors none,bad_bearer,auditor
+tests:
+  - id: L0
+    name: Preconditions
+    why: Lockdown probes require CRS on and provisioned fixture users.
+    steps:
+      - flex-test inspect shows access control enabled
+      - flex-test crs provision-users if fixture users missing
+      - Prefer ROBOT_USE_HTTPS=true after flex-test crs trust-ca
+    result: skipped
+
+  - id: L1
+    name: Parameter-free lockdown (safe methods)
+    why: >
+      Fast pass over parameter-free catalog routes with negative actors. Excludes
+      DISRUPTIVE+ endpoints (restart, shutdown, wifi, reset-data, OS update) so
+      probes never reboot or reconfigure the robot.
+    steps:
+      - uv run flex-test crs lockdown --show-failures
+      - GET without credentials → expect 200/404 (reads not gated by CRS)
+      - POST/PATCH/PUT/DELETE without credentials → expect 401/403
+      - Fail on mutations returning 200/201/204 without valid credentials
+      - Robot-server mutation non-401/403 logged as report-only
+    result: skipped
+
+  - id: L2
+    name: Parameterized lockdown (placeholder IDs)
+    why: Auth must fail before resource checks on templated paths.
+    steps:
+      - uv run flex-test crs lockdown --include-parameterized --show-failures
+      - Review skipped unresolved paths in output
+    result: skipped
+
+  - id: L3
+    name: Auth-server and audit-server mutation strict pass
+    why: Hard enforcement services must deny unauthenticated mutations.
+    steps:
+      - uv run flex-test crs lockdown --strict-only --show-failures
+      - Expect zero mutation bypass failures
+    result: skipped
+
+  - id: L4
+    name: GET reachability matrix (with and without tokens)
+    why: auth-matrix verifies GET works for no token and each fixture role.
+    steps:
+      - uv run flex-test crs auth-matrix
+    result: skipped
+
+notes: >
+  Actors: none (no header), bad_bearer, malformed_bearer, bad_oauth (wrong ROPC
+  password), auditor (read-only), operator (user scopes). Public routes:
+  GET /health, GET /server/update/health, GET /auth/settings/accessControlEnabled,
+  POST /auth/oauth2/token. CRS gates mutations only; GET works with or without
+  credentials. Strict services: auth-server and audit-server mutations.
+  Safety: catalog excludes DISRUPTIVE+ endpoints; auditor/operator only probe
+  mutation deny cases (never send authed POST expecting 200). GET reachability:
+  flex-test crs auth-matrix and Tier A unauthenticated baseline. Implementation:
+  catalog/crs_on_lockdown.py, capabilities/crs_on_lockdown.py.

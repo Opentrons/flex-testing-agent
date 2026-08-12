@@ -21,7 +21,7 @@ work. We need:
 
 | Phase | Command / capability | Mutates | Notes |
 |-------|----------------------|---------|-------|
-| **0. Build** | `flex-test put <ver>` | INSTALLATION | Baseline first: latest external `9.1.2-alpha.*` (no Pyro). Later re-run on internal `4.0.0-alpha.*` for comparison. |
+| **0. Build** | `flex-test put <ver>` | INSTALLATION | Baseline: external `10.0.0-alpha.*` (Pyro line; formerly internal `4.0.0-alpha.*`). Older customer `9.1.2-alpha.*` still useful for non-Pyro compare. |
 | **1. Clear robot-server data** | `flex-test reset-data` | DISRUPTIVE | `POST /settings/reset` with `runsHistory` (protocols, runs, offsets, …). Do **not** clear `authorizedKeys` by default. |
 | **2. Deck config** | part of known-state setup | REVERSIBLE | PUT known cutouts (HS on D1, trash A3, slots). |
 | **3. LPC / offsets** | part of known-state setup | REVERSIBLE + motion if probe | Prefer applying known offsets via HTTP when full probe LPC is blocked; live LPC only with explicit motion gate. |

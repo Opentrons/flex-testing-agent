@@ -76,12 +76,18 @@ class RunsClient:
             expected_status=(200,),
         )
 
-    async def sign_off(self, run_id: str, *, signed_by: str) -> dict[str, Any]:
+    async def sign_off(
+        self,
+        run_id: str,
+        *,
+        signed_by: str,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> dict[str, Any]:
         """PATCH ``/runs/{runId}`` with CRS protocol-log signoff."""
         return await self._session.patch_json(
             f"/runs/{run_id}",
             json_body={"data": {"signedBy": signed_by}},
-            expected_status=(200,),
+            expected_status=expected_status or (200,),
         )
 
     async def create_action(

@@ -36,13 +36,14 @@ class UpdateClient:
         *,
         auto_commit_and_restart: bool = True,
         timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
         """Start an update session."""
         return await self._session.post_json(
             "/server/update/begin",
             json_body={"auto_commit_and_restart": auto_commit_and_restart},
             timeout=timeout,
-            expected_status=(201,),
+            expected_status=expected_status or (201,),
         )
 
     async def cancel(self, *, timeout: float | None = None) -> dict[str, Any]:
@@ -71,6 +72,14 @@ class UpdateClient:
     ) -> dict[str, Any]:
         """Upload a Flex ``ot3-system.zip`` as multipart field ``system-update.zip``."""
         url = f"/server/update/{token}/file"
+        # Match RobotHttpSession mutating-header rules (CRS Opentrons-User-Notes).
+        headers = self._session._merge_mutation_headers("POST", None)
+        # Large system zips need long write/read timeouts; a bare float is fine,
+        # but be explicit so connect stays bounded while the body can stream.
+        request_timeout = httpx.Timeout(
+            timeout if timeout is not None else 1800.0,
+            connect=60.0,
+        )
         try:
             with zip_path.open("rb") as handle:
                 files = {
@@ -83,7 +92,8 @@ class UpdateClient:
                 response = await self._session._client.post(
                     url,
                     files=files,
-                    timeout=timeout,
+                    headers=headers,
+                    timeout=request_timeout,
                 )
         except httpx.TimeoutException as exc:
             raise RobotTimeoutError(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ssl
 from typing import Any
 
+from flex_testing_agent.clients.audit import AuditClient
 from flex_testing_agent.clients.auth_settings import AuthSettingsClient
 from flex_testing_agent.clients.camera import CameraClient
 from flex_testing_agent.clients.client_data import ClientDataClient
@@ -12,6 +13,7 @@ from flex_testing_agent.clients.data_files import DataFilesClient
 from flex_testing_agent.clients.error_recovery import ErrorRecoveryClient
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.health import HealthClient
+from flex_testing_agent.clients.instruments import InstrumentsClient
 from flex_testing_agent.clients.labware_offsets import LabwareOffsetsClient
 from flex_testing_agent.clients.logs import LogsClient
 from flex_testing_agent.clients.maintenance_runs import MaintenanceRunsClient
@@ -95,11 +97,13 @@ class FlexRobot:
         self.health = HealthClient(self._session)
         self.update_health = UpdateHealthClient(self._session)
         self.auth_settings = AuthSettingsClient(self._session)
+        self.audit = AuditClient(self._session)
         self.update = UpdateClient(self._session)
         self.camera = CameraClient(self._session)
         self.logs = LogsClient(self._session)
         self.readonly = ReadonlyClient(self._session)
         self.modules = ModulesClient(self._session)
+        self.instruments = InstrumentsClient(self._session)
         self.protocols = ProtocolsClient(self._session)
         self.runs = RunsClient(self._session)
         self.maintenance_runs = MaintenanceRunsClient(self._session)

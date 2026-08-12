@@ -1,0 +1,164 @@
+id: 10.0.0-alpha.0-pyro-subprocess
+title: Pyro / protocol-subprocess smoke (Flex external 10.0.0-alpha.0)
+summary: >
+  Validation checklist for Pyro5 IPC on KansasFLEX after installing external
+  v10.0.0-alpha.0 (same product line as former internal ot3@4.0.0-alpha.N;
+  hardware + protocol subprocess flags default on). Prefer full robot reboot
+  for recovery. Skip nameserver/service-restart experiments by default
+  (RQA-5789 / RQA-5790 Low / expected). Narrative: docs/pyro-testing.md.
+  Parent bug epic: RQA-5831.
+status: validated
+updated: "2026-08-11"
+release:
+  monorepo_branch: edge
+  compared_to_tag: v10.0.0-alpha.0
+  robot_os: 10.0.0-alpha.0
+  tickets:
+    - key: RQA-5831
+      title: "10.0.0-alpha.0 Bugs"
+    - key: RQA-5484
+      title: "10.0.0 Bugs"
+    - key: RQA-5786
+      title: "4.0.0-alpha.10 Bugs (historical internal line)"
+    - key: RQA-5787
+      title: "robot-server Application startup / nginx 502 after update while firmware flash in progress"
+    - key: RQA-5789
+      title: "After nameserver restart, OT3API / robot-server-resource never re-register (Low / expected)"
+    - key: RQA-5790
+      title: "robot-server does not reattach after hardware-api restart (Low / expected)"
+    - key: RQA-5791
+      title: "Uncurrenting a run removes ot-protocol from nameserver but leaves processes running"
+    - key: EXEC-2187
+      title: "Protocol Subprocesses (Current)"
+hardware_required:
+  - flex_1channel_50 (right)
+  - opentrons_flex_96_filtertiprack_50ul in A1 (for live tip smoke only)
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test probe --no-picture
+    - ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external
+    - "ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST"
+tests:
+  - id: A1
+    name: Systemd pyro stack active
+    why: Nameserver must precede hardware-api and robot-server for IPC.
+    steps:
+      - SSH or serial to the robot.
+      - "Run: systemctl is-active opentrons-pyro-nameserver opentrons-hardware-api opentrons-robot-server"
+      - Expect all active and enabled.
+    result: pass
+    notes: "2026-08-11 all three active; flags enableHardwareSubprocess/enableProtocolSubprocess true."
+  - id: A2
+    name: OT3API registered on nameserver
+    why: Hardware entrypoint notifies ready only after OT3API is listed.
+    steps:
+      - "With Pyro5, locate_ns() and confirm OT3API in ns.list() within 60s."
+      - "Optional: Proxy(resolve('PYRONAME:OT3API')).get_fw_version()."
+    result: pass
+    notes: "OT3API + robot-server-resource present; get_fw_version → 68."
+  - id: A3
+    name: Health OK with HW proxy path
+    why: robot-server identify_hardware_process depends on NS + OT3API.
+    steps:
+      - "GET /health expect 200; GET /instruments and /subsystems/status populate."
+    result: pass
+    notes: "v10.0.0-alpha.0 healthy; CRS on (OAuth used for mutating calls)."
+  - id: A4
+    name: Nameserver restart recovery
+    why: Historical; producers should re-register or fail clearly.
+    steps:
+      - "Skip by default (RQA-5789 Low / expected). If regressing a fix: restart opentrons-pyro-nameserver only and poll NS."
+    result: skipped
+    notes: "Dev guidance 2026-08: service-restart re-register gaps are expected; prefer full robot reboot for operator recovery."
+  - id: A5
+    name: Hardware-api restart reattach
+    why: Historical; robot-server must refresh OT3API proxy after HW daemon URI changes.
+    steps:
+      - "Skip by default (RQA-5790 Low / expected)."
+    result: skipped
+    notes: "Same as A4; full robot reboot is the documented recovery."
+  - id: B1
+    name: Instruments and subsystems via HTTP
+    why: Lower-line IPC must serve robot-server instrument inventory.
+    steps:
+      - "GET /instruments and /subsystems/status."
+    result: pass
+    notes: "left p50_multi_flex + right p50_single_flex; 6 subsystems ok."
+  - id: B2
+    name: Module nested proxies
+    why: Nested module proxies when hardware is attached.
+    steps:
+      - "Attach a module; GET /modules."
+    result: skipped
+    notes: "No modules attached."
+  - id: B3
+    name: Door open/close via HTTP
+    why: Door watcher / HW door events must surface through robot-server.
+    steps:
+      - "Poll GET /robot/door/status while opening and closing the door."
+    result: pass
+    notes: "Door closed via GET /robot/door/status (no open/close cycle this session)."
+  - id: C1
+    name: Create run registers ot-protocol
+    why: Run lifetime should own a protocol subprocess + NS name.
+    steps:
+      - Upload a Python protocol; wait analysis completed; POST /runs.
+      - "Confirm NS has ot-protocol and ps shows run_process_entry_point."
+    result: pass
+    notes: >
+      Idle current run 7968ccc8-…; NS now uses UUID-suffixed names
+      (ot-protocol_<uuid>) plus run_process_entry_point processes.
+  - id: C2
+    name: Protocol analysis completes
+    why: Analysis path uses simulating / subprocess machinery.
+    steps:
+      - After upload, poll protocol analysisSummaries until completed.
+    result: pass
+    notes: "Protocol b96f86d9-… analyses completed."
+  - id: C3a
+    name: Idle run actions contract
+    why: Actions must cross robot-server to ot-protocol Pyro boundary.
+    steps:
+      - "On idle run: pause expects 409; stop accepted; cancel is not a valid actionType."
+    result: pass
+    notes: "stop accepted → status stopped."
+  - id: C3b
+    name: Live tip smoke play
+    why: Play must execute motion commands across the protocol subprocess boundary.
+    steps:
+      - "Only with explicit operator request. Deck tiprack A1; play; wait succeeded."
+    result: skipped
+    notes: "No live motion requested this session."
+  - id: C6
+    name: Uncurrent tears down process
+    why: Protocol process lifetime should match run record create to uncurrent.
+    steps:
+      - "With current run and ot-protocol in NS, PATCH run current=false."
+      - "Confirm NS drops ot-protocol and no orphan run_process_entry_point remains."
+    result: blocked
+    notes: >
+      With CRS on, PATCH current=false returned 409 RunSignoffRequired.
+      After stop, ot-protocol_<uuid> and ot-simulating-protocol_<uuid> processes
+      still present (same class as RQA-5791). Needs CRS signoff path or CRS-off
+      retest before filing a new bug.
+  - id: D1
+    name: Door enum via HTTP
+    why: DoorState must serialize through robot-server product path.
+    steps:
+      - "GET /robot/door/status; expect open or closed."
+    result: pass
+    notes: "closed"
+  - id: D7
+    name: Subsystems status healthy
+    why: Regression check for subsystem serialization issues.
+    steps:
+      - "GET /subsystems/status; expect all subsystems ok."
+    result: pass
+    notes: "gantry_x/y, head, pipette_left/right, rear_panel all ok."
+notes: >
+  File product bugs under RQA-5831 in general operator language (HTTP paths,
+  ODD/App symptoms, systemd unit names). Do not put harness suite IDs or
+  flex-test command names in Jira summaries. Operator recovery: full robot
+  reboot, then wait for GET /health 200. CRS-on: put/install needs
+  ROBOT_USERNAME/ROBOT_PASSWORD; uncurrent may require run signoff.

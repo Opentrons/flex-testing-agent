@@ -62,8 +62,37 @@ Typical Kansas concern:
 | Internal | `ot3@4.0.0-beta.0` | `4.0.0-beta.0` |
 | External | `v9.1.0-alpha.7` | `9.1.0-alpha.7` |
 | External | `v9.1.0` | `9.1.0` |
+| External (Pyro line) | `v10.0.0-alpha.0` | `10.0.0-alpha.0` |
 
 Coordinated Flex tags also land on `oe-core` and (with firmware mapping rules) `ot3-firmware`. Details: robot-stack README and `automation/release_tag_catalog.py`.
+
+## 10.0.0 external = former internal 4.0.0 Pyro line
+
+As of 2026-08, the **same** Flex OS / Pyro subprocess stack that shipped as
+internal `4.0.0-alpha.N` / `ot3@4.0.0-alpha.N` is published on the **external**
+channel as `10.0.0-alpha.N` / `v10.0.0-alpha.N`.
+
+| Before (lab internal) | Now (customer-facing external) |
+|-----------------------|--------------------------------|
+| `4.0.0-alpha.N` | `10.0.0-alpha.N` |
+| `ot3@4.0.0-alpha.N` | `v10.0.0-alpha.N` |
+| `--channel internal` | `--channel external` |
+| Bug epic example: [RQA-5786](https://opentrons.atlassian.net/browse/RQA-5786) | [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831) (`10.0.0-alpha.0 Bugs`) |
+
+Practical rules for KansasFLEX:
+
+```bash
+# Install the current Pyro / subprocess alpha (external):
+ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external
+
+# Older internal 4.0.0-alpha.* keys may still exist on the internal manifest
+# for archaeology; do not treat them as the active validation target.
+```
+
+Pyro validation narrative: [pyro-testing.md](pyro-testing.md). Parent bug epic for
+alpha.0 findings: [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831)
+(under initiative [RQA-5484](https://opentrons.atlassian.net/browse/RQA-5484)
+`10.0.0 Bugs`).
 
 ## CLI
 
@@ -78,6 +107,8 @@ uv run flex-test releases --channel external
 Classify a version string from inspect/health:
 
 ```bash
+uv run flex-test releases --installed 10.0.0-alpha.0
+uv run flex-test releases --installed v10.0.0-alpha.0
 uv run flex-test releases --installed 4.0.0-alpha.5
 uv run flex-test releases --installed ot3@4.0.0-beta.0
 ```
@@ -91,9 +122,14 @@ uv run flex-test inspect
 Put KansasFLEX on a published version (mutates robot; requires `ALLOW_MUTATIONS=true`):
 
 ```bash
-uv run flex-test put 9.1.2-alpha.0
+# Current Pyro / subprocess line (external 10.0.0-alpha.*):
+uv run flex-test put 10.0.0-alpha.0 --channel external
+# Older customer 9.x line:
+uv run flex-test put 9.1.2-alpha.0 --channel external
 ```
 
+Manifest fetch uses uncompressed (`Accept-Encoding: identity`) requests so a
+stale CloudFront gzip object does not hide newly published keys.
 Compare the inspect `Installed software version` to `flex-test releases` output to see whether KansasFLEX is current for a given lane.
 
 ## robot-stack files to read first

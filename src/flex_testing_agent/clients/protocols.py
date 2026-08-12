@@ -56,6 +56,7 @@ class ProtocolsClient:
         protocol_kind: str = "standard",
         key: str | None = None,
         timeout: float = 120.0,
+        expected_status: tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
         """POST multipart ``/protocols`` with one protocol file."""
         content = file_path.read_bytes()
@@ -72,7 +73,7 @@ class ProtocolsClient:
             ],
             form_fields=form,
             timeout=timeout,
-            expected_status=(200, 201),
+            expected_status=expected_status or (200, 201),
         )
 
     async def delete_protocol(self, protocol_id: str) -> dict[str, Any]:

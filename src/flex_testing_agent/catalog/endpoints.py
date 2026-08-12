@@ -84,6 +84,19 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         ),
     ),
     EndpointSpec(
+        name="get_audit_external_logPeriods_download",
+        method=HttpMethod.GET,
+        path="/audit/external/logPeriods/{logPeriodId}/download",
+        service=ApiService.AUDIT_SERVER,
+        group="audit",
+        risk_level=RiskLevel.READ_ONLY,
+        notes="Parameterized; download zip for one period. CRS-on App path.",
+        crs_off_acceptable_status=(
+            200,
+            404,
+        ),
+    ),
+    EndpointSpec(
         name="get_audit_external_settings",
         method=HttpMethod.GET,
         path="/audit/external/settings",

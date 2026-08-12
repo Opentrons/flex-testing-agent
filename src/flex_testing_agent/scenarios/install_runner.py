@@ -8,6 +8,7 @@ from flex_testing_agent.evidence.store import EvidenceStore
 from flex_testing_agent.logging import get_logger
 from flex_testing_agent.models.build import InstallResult
 from flex_testing_agent.models.run import RunStatus
+from flex_testing_agent.orchestration.crs_auth import optional_access_token
 from flex_testing_agent.orchestration.lock import RobotOperationLock
 from flex_testing_agent.orchestration.run_context import RunContext
 from flex_testing_agent.persistence.store import SqlStore, bootstrap_store
@@ -56,7 +57,10 @@ async def run_install(
                 detail=f"install {version}",
             )
 
-            async with FlexRobot(settings) as robot:
+            access_token = await optional_access_token(
+                settings, require_when_enabled=True
+            )
+            async with FlexRobot(settings, access_token=access_token) as robot:
                 result = await install_build(
                     robot,
                     version,

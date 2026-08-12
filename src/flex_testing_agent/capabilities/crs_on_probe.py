@@ -94,7 +94,7 @@ class CrsOnTierAResult(BaseModel):
 async def probe_unauthenticated_baseline(
     settings: Settings,
 ) -> CrsOnBaselineResult:
-    """Sample CRS-on behavior without a bearer token (expect mostly 401/403)."""
+    """Sample CRS-on GET catalog without a bearer token (expect success)."""
     denied = 0
     ok = 0
     samples: list[str] = []

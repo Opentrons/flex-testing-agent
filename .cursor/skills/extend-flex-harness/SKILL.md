@@ -3,16 +3,20 @@ name: extend-flex-harness
 description: >-
   Extends the flex-testing-agent harness by adding typed robot API clients,
   capabilities, CLI commands, and read-only endpoint coverage. Use when adding
-  Flex HTTP endpoints, new inspect/probe/install behavior, camera features,
-  release tooling, or when the user asks to grow the harness instead of
-  calling the robot ad hoc.
+  Flex HTTP endpoints, new inspect/probe/install/status/wait-health behavior,
+  camera features, release tooling, or when the user asks to grow the harness
+  instead of calling the robot ad hoc (no curl).
 ---
 
 # Extend the Flex testing harness
 
 ## Goal
 
-Grow `flex-testing-agent` through the existing layers. Do not bypass clients with one-off httpx/curl in capabilities or agent glue.
+Grow `flex-testing-agent` through the existing layers. Do not bypass clients with
+one-off httpx/curl in capabilities, CLI, or agent sessions.
+
+**Agents operating KansasFLEX must not curl the robot.** If the CLI/capability
+is missing, add it here first, then use it.
 
 ## Workflow
 
@@ -39,10 +43,12 @@ Grow `flex-testing-agent` through the existing layers. Do not bypass clients wit
 
 | Task | Copy from |
 |------|-----------|
-| JSON GET client | `clients/health.py` |
+| JSON GET client | `clients/health.py`, `clients/instruments.py` |
 | Binary POST (JPEG) | `clients/camera.py` |
 | Read-only catalog | `clients/readonly.py` |
-| Capability + summary | `capabilities/probe.py`, `capabilities/inspect.py` |
+| Capability + summary | `capabilities/probe.py`, `capabilities/inspect.py`, `capabilities/robot_status.py` |
+| Post-install health wait | `capabilities/wait_health.py` → `flex-test wait-health` |
+| CRS-on OAuth for CLI | `orchestration/crs_auth.py` (`optional_access_token`) |
 | Mutating install | `capabilities/install.py` + `orchestration/gates.py` |
 | Release catalog | `releases/` |
 
@@ -51,6 +57,7 @@ Grow `flex-testing-agent` through the existing layers. Do not bypass clients wit
 ```
 - [ ] Client method(s) added; no ad-hoc HTTP elsewhere
 - [ ] Capability descriptor + gates if user-facing operation
+- [ ] CLI wired so agents never need curl for this path
 - [ ] READONLY_ENDPOINTS updated for new GETs
 - [ ] FlexRobot / CLI wired if operators need it
 - [ ] Unit tests for client/capability
@@ -60,19 +67,22 @@ Grow `flex-testing-agent` through the existing layers. Do not bypass clients wit
 ## Natural next surfaces (learned from Pyro testing)
 
 Do **not** add ad-hoc SSH/curl from agents. When growing the harness for
-internal Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
+Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
 
 | Gap | Suggested layering |
 |-----|--------------------|
-| Post-install waiter (long 502 + FW flash) | `capabilities/install.py` or companion waiter |
-| Pyro / service health correlation | read-only capability (+ optional SSH later), not raw shell |
-| Protocol upload / analyze / create-run | typed clients → gated capabilities |
+| Protocol upload / analyze / create-run / sign-off | typed clients → gated capabilities → `flex-test protocol …` |
+| Pyro / nameserver status | read-only capability (+ optional SSH later), not raw shell |
 | Run play / tip smoke | `PHYSICAL_MOTION` risk; only with explicit gates + operator request |
-| Door / instruments already via HTTP | extend `READONLY_ENDPOINTS` / probe summary if useful |
 
-Restart recovery failures (nameserver / hardware-api reattach) are product bugs
-to regression-test once fixed, not something the harness should paper over by
-silently restarting services unless the user asks for recovery.
+`flex-test status` and `flex-test wait-health` already cover instruments/door/subsystems
+and post-install `/health` polling.
+
+Restart recovery failures after **individual systemd unit restarts** (nameserver /
+hardware-api reattach) are tracked as Low / expected for now (RQA-5789 /
+RQA-5790). Prefer documenting **full robot reboot** as operator recovery. Do not
+paper over product issues by silently restarting services unless the user asks
+for recovery.
 
 ## References
 

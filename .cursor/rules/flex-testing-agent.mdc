@@ -15,6 +15,7 @@ Local Python harness for a physical Opentrons Flex (**KansasFLEX**). The harness
 4. **CLI** (`flex-test`) or future adapters – thin entrypoints only
 
 Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from agents.
+**Agents must not `curl` the robot**; use `flex-test` / typed clients, or extend the harness.
 
 ## Existing surface to reuse
 
@@ -23,6 +24,8 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Session + headers | `clients/session.py` |
 | Health / update / auth detect | `clients/health.py`, `update_health.py`, `auth_settings.py` |
 | Read-only catalog + probe | `clients/readonly.py`, `capabilities/probe.py` |
+| Status (instruments/door/subsystems) | `capabilities/robot_status.py`, `flex-test status` |
+| Post-install health wait | `capabilities/wait_health.py`, `flex-test wait-health` |
 | Camera | `clients/camera.py` |
 | Diagnostic logs | `clients/logs.py`, `capabilities/archive_logs.py`, `flex-test logs` |
 | Install / update | `clients/update.py`, `capabilities/install.py` |
@@ -30,7 +33,9 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Flex facade | `robots/flex.py` |
 | Gates | `orchestration/gates.py` |
 | Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/pyro-testing.md`, `docs/serial-console.md`, `docs/robot-logs.md` |
-| Pyro test plan | `docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml` |
+| Pyro test plan | `docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml` |
+| Pyro narrative | `docs/pyro-testing.md` (external `10.0.0-alpha.N` = former internal `4.0.0-alpha.N`) |
+| Bug epic | [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831) |
 | FTDI serial console | `serial_console/` + `flex-test serial` (Tabby alternative; not HTTP) |
 
 ## Extension rules
@@ -51,7 +56,7 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 uv sync --all-extras
 make lint          # ruff + mypy (required after code changes)
 make test
-uv run flex-test inspect|probe|releases|put <version>
+uv run flex-test inspect|status|wait-health|probe|releases|put <version>
 uv run flex-test serial list|shell|run   # FTDI console; docs/serial-console.md
 uv run flex-test logs list|archive       # diagnostic logs; docs/robot-logs.md
 ```

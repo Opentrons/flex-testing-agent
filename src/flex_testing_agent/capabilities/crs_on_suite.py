@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from flex_testing_agent.capabilities.crs_off import TierBResult, TierCResult
+from flex_testing_agent.capabilities.crs_on_lockdown import run_crs_on_lockdown
 from flex_testing_agent.capabilities.crs_on_matrix import run_auth_matrix
 from flex_testing_agent.capabilities.crs_on_probe import CrsOnTierAResult, probe_crs_on
 from flex_testing_agent.capabilities.crs_on_tier_b import run_crs_on_tier_b
@@ -45,6 +46,7 @@ CRS_ON_SUITE = CapabilityDescriptor(
 class CrsOnSuiteResult(BaseModel):
     """Combined CRS-on suite outcome."""
 
+    lockdown: dict[str, Any] | None = None
     tier_a: CrsOnTierAResult | None = None
     tier_b: TierBResult | None = None
     tier_c: TierCResult | None = None
@@ -86,10 +88,11 @@ async def run_crs_on_suite(
     username: str = "flex_test_service",
     include_auth_matrix: bool = True,
     include_unauth_baseline: bool = False,
+    include_lockdown: bool = False,
     create_fixtures: bool = True,
     protocol_path: Path | None = None,
 ) -> CrsOnSuiteResult:
-    """Execute CRS-on matrix (optional) → Tier A → B → C with timing."""
+    """Execute optional lockdown preflight → matrix → Tier A → B → C with timing."""
     ensure_mutation_allowed(
         settings,
         risk_level=CRS_ON_SUITE.risk_level,
@@ -112,6 +115,34 @@ async def run_crs_on_suite(
     result = CrsOnSuiteResult()
     soft_notes: list[str] = []
     hard_failures: list[str] = []
+
+    if include_lockdown:
+        log.info("crs_on_suite_lockdown_preflight_start")
+        async with timing.aspan("crs_on.lockdown_preflight"):
+            lockdown = await run_crs_on_lockdown(
+                settings,
+                include_parameterized=False,
+                strict_only=False,
+                label="suite-preflight",
+            )
+        result.lockdown = {
+            "label": lockdown.label,
+            "ok_count": lockdown.ok_count,
+            "fail_count": lockdown.fail_count,
+            "leak_count": lockdown.leak_count,
+            "hard_failures": len(lockdown.hard_failures()),
+            "skipped": len(lockdown.skipped),
+        }
+        result.counts["lockdown_ok"] = lockdown.ok_count
+        result.counts["lockdown_failed"] = lockdown.fail_count
+        result.counts["lockdown_hard_failed"] = len(lockdown.hard_failures())
+        result.counts["lockdown_leaks"] = lockdown.leak_count
+        if lockdown.hard_failures():
+            hard_failures.append(
+                f"lockdown_hard_failed={len(lockdown.hard_failures())}"
+            )
+        if lockdown.oauth_bad_password_ok is False:
+            hard_failures.append("lockdown_bad_oauth_accepted")
 
     if include_auth_matrix:
         log.info("crs_on_suite_auth_matrix_start")

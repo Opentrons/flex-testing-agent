@@ -29,7 +29,18 @@ async def fetch_robot_manifest(
     owns_client = client is None
     http = client or httpx.AsyncClient(timeout=timeout_seconds)
     try:
-        response = await http.get(url)
+        # CloudFront varies on Accept-Encoding. The gzip edge object can stay
+        # stale after a new key lands (seen with 10.0.0-alpha.0 while identity
+        # / curl uncompressed responses were already current). Prefer
+        # uncompressed so put/releases see newly published builds.
+        response = await http.get(
+            url,
+            headers={
+                "Accept-Encoding": "identity",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+            },
+        )
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):

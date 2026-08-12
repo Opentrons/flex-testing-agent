@@ -139,13 +139,16 @@ This reads public `ot3-oe/releases.json` manifests (internal + external hosts fr
 uv run flex-test put 9.1.2-alpha.0
 # equivalent:
 uv run flex-test install 9.1.2-alpha.0 --channel external
-# Internal / ot3@ stack (Pyro subprocess builds):
-uv run flex-test put 4.0.0-alpha.10 --channel internal
+# Current Pyro / protocol-subprocess line (external; same stack as former
+# internal 4.0.0-alpha.*). See docs/robot-versions.md and docs/pyro-testing.md.
+uv run flex-test put 10.0.0-alpha.0 --channel external
 ```
 
 This downloads the published `ot3-system.zip` for that version, uploads it through update-server (`/server/update/*`), commits, restarts, and verifies `system_version`.
 
-On internal Pyro builds, `/health` may return nginx **502** for several minutes after commit while firmware flashes and robot-server attaches to the nameserver. See [docs/pyro-testing.md](docs/pyro-testing.md).
+When CRS (access control) is enabled, set `ROBOT_USERNAME` / `ROBOT_PASSWORD` so `put` can obtain an OAuth bearer token; otherwise update-server returns 401.
+
+On Pyro builds (`10.0.0-alpha.*`), `/health` may return nginx **502** for several minutes after commit while firmware flashes and robot-server attaches to the nameserver. Prefer **full robot reboot** if still unhealthy after firmware is idle. See [docs/pyro-testing.md](docs/pyro-testing.md).
 
 ## FTDI serial console (no Tabby)
 

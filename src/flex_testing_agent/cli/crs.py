@@ -9,10 +9,18 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from flex_testing_agent.capabilities.crs_auth_settings_suite import (
+    parse_case_ids,
+    run_auth_settings_suite,
+)
 from flex_testing_agent.capabilities.crs_on import (
     run_enable_crs,
     run_provision_users,
     run_trust_ca,
+)
+from flex_testing_agent.capabilities.crs_on_lockdown import (
+    LockdownActor,
+    run_crs_on_lockdown,
 )
 from flex_testing_agent.capabilities.crs_on_matrix import run_auth_matrix
 from flex_testing_agent.capabilities.crs_on_probe import probe_crs_on
@@ -166,7 +174,7 @@ def crs_probe_cmd(
     skip_baseline: bool = typer.Option(
         False,
         "--skip-baseline",
-        help="Skip unauthenticated 401/403 baseline before authenticated probe.",
+        help="Skip unauthenticated GET baseline before authenticated probe.",
     ),
     skip_users_api: bool = typer.Option(
         False,
@@ -203,10 +211,10 @@ def crs_probe_cmd(
             table.add_row("Users API failed", str(tier_a.users_failed))
         if baseline is not None:
             table.add_row(
-                "Unauth denied (401/403)",
+                "Unauth GET unexpected deny",
                 str(baseline.unauthenticated_denied),
             )
-            table.add_row("Unauth OK", str(baseline.unauthenticated_ok))
+            table.add_row("Unauth GET OK", str(baseline.unauthenticated_ok))
         console.print(table)
         if tier_a.user_management is not None and tier_a.user_management.steps:
             um_table = Table(title="User-management API")
@@ -372,14 +380,19 @@ def crs_suite_cmd(
         "--skip-auth-matrix",
         help="Skip scoped GET authorization matrix at suite start.",
     ),
+    include_lockdown: bool = typer.Option(
+        False,
+        "--include-lockdown",
+        help="Run CRS-on negative auth lockdown (L1 parameter-free) before the suite.",
+    ),
     include_baseline: bool = typer.Option(
         False,
         "--include-baseline",
-        help="Include unauthenticated baseline before Tier A probe.",
+        help="Include unauthenticated GET baseline before Tier A probe.",
     ),
     protocol: Path | None = _PROTOCOL_OPTION,
 ) -> None:
-    """CRS-on full suite: auth matrix + Tier A + B + C (requires ALLOW_MUTATIONS)."""
+    """CRS-on full suite: optional lockdown + auth matrix + Tier A + B + C."""
 
     async def _run() -> int:
         settings = await _settings_for_robot()
@@ -393,6 +406,7 @@ def crs_suite_cmd(
                 username=as_user,
                 include_auth_matrix=not skip_auth_matrix,
                 include_unauth_baseline=include_baseline,
+                include_lockdown=include_lockdown,
                 create_fixtures=True,
                 protocol_path=protocol,
             )
@@ -407,6 +421,12 @@ def crs_suite_cmd(
         table.add_column("Notes")
         counts = result.counts
         suite_rows = (
+            (
+                "Lockdown preflight",
+                "lockdown_ok",
+                "lockdown_failed",
+                "lockdown_hard_failed",
+            ),
             (
                 "Auth matrix",
                 "auth_matrix_ok",
@@ -430,6 +450,14 @@ def crs_suite_cmd(
                     f"get={counts.get('tier_a_probe_ok', 0)} "
                     f"users={counts.get('tier_a_users_ok', 0)}"
                 )
+            elif label == "Lockdown preflight":
+                if counts.get("lockdown_ok") is None:
+                    notes = "skipped"
+                else:
+                    notes = (
+                        f"hard={counts.get('lockdown_hard_failed', 0)} "
+                        f"leaks={counts.get('lockdown_leaks', 0)}"
+                    )
             elif notes_key and counts.get(notes_key) is not None:
                 notes = f"skipped={counts.get(notes_key)}"
             else:
@@ -486,6 +514,138 @@ def crs_auth_matrix_cmd() -> None:
                 console.print(f"  {item}")
         console.print(f"OK={matrix.ok_count} failed={matrix.fail_count}")
         return 0 if matrix.fail_count == 0 else 1
+
+    raise typer.Exit(asyncio.run(_run()))
+
+
+def _parse_lockdown_actors(raw: str) -> tuple[LockdownActor, ...]:
+    actors: list[LockdownActor] = []
+    for part in raw.split(","):
+        name = part.strip()
+        if not name:
+            continue
+        actors.append(LockdownActor(name))
+    if not actors:
+        raise typer.BadParameter("Provide at least one actor")
+    return tuple(actors)
+
+
+@crs_app.command("lockdown")
+def crs_lockdown_cmd(
+    actors: str = typer.Option(
+        "none,bad_bearer,malformed_bearer,bad_oauth,auditor,operator",
+        "--actors",
+        help=(
+            "Comma-separated personas: none, bad_bearer, malformed_bearer, "
+            "bad_oauth, auditor, operator."
+        ),
+    ),
+    include_parameterized: bool = typer.Option(
+        False,
+        "--include-parameterized/--parameter-free-only",
+        help="Also probe parameterized paths (placeholder or fixture IDs).",
+    ),
+    create_fixtures: bool = typer.Option(
+        False,
+        "--create-fixtures",
+        help=(
+            "With --include-parameterized, seed Tier B fixture IDs instead of "
+            "placeholder UUIDs (requires ALLOW_MUTATIONS)."
+        ),
+    ),
+    strict_only: bool = typer.Option(
+        False,
+        "--strict-only",
+        help="Only auth-server and audit-server endpoints (hard-fail enforcement).",
+    ),
+    show_failures: bool = typer.Option(
+        False,
+        "--show-failures",
+        help="Print failing rows (default: summary only).",
+    ),
+    protocol: Path | None = _PROTOCOL_OPTION,
+) -> None:
+    """CRS-on negative auth: no / bad / under-scoped credential probes."""
+
+    async def _run() -> int:
+        settings = await _settings_for_robot()
+        if not settings.robot_use_https:
+            console.print(
+                "[yellow]ROBOT_USE_HTTPS is false; "
+                "set true for CRS-on lockdown.[/yellow]"
+            )
+        try:
+            parsed_actors = _parse_lockdown_actors(actors)
+        except ValueError as exc:
+            console.print(f"[red]Invalid --actors: {exc}[/red]")
+            return 2
+
+        if create_fixtures and not include_parameterized:
+            console.print(
+                "[yellow]--create-fixtures requires --include-parameterized[/yellow]"
+            )
+            return 2
+
+        label = "l3" if strict_only else ("l2" if include_parameterized else "l1")
+
+        result = await run_crs_on_lockdown(
+            settings,
+            actors=parsed_actors,
+            include_parameterized=include_parameterized,
+            strict_only=strict_only,
+            create_fixtures=create_fixtures,
+            protocol_path=protocol,
+            label=label,
+        )
+
+        if result.oauth_bad_password_ok is not None:
+            oauth_style = "green" if result.oauth_bad_password_ok else "red"
+            console.print(
+                f"[{oauth_style}]bad_oauth POST /auth/oauth2/token → "
+                f"{result.oauth_bad_password_status}[/{oauth_style}]"
+            )
+
+        if show_failures:
+            table = Table(title="CRS-on lockdown failures")
+            table.add_column("Endpoint")
+            table.add_column("Method")
+            table.add_column("Actor")
+            table.add_column("Expected")
+            table.add_column("Status")
+            table.add_column("Detail")
+            for row in result.results:
+                if row.ok:
+                    continue
+                table.add_row(
+                    row.endpoint,
+                    row.method,
+                    row.actor,
+                    row.expected,
+                    str(row.status_code),
+                    (row.detail or "")[:60],
+                )
+            console.print(table)
+
+        console.print(
+            f"OK={result.ok_count} failed={result.fail_count} "
+            f"hard={len(result.hard_failures())} "
+            f"leaks={result.leak_count} skipped={len(result.skipped)}"
+        )
+        if result.fixtures:
+            console.print(f"[dim]fixtures={result.fixtures}[/dim]")
+        evidence = (
+            settings.ensure_artifact_directory()
+            / "pyro-tests"
+            / f"crs-on-lockdown-{label}.json"
+        )
+        console.print(f"evidence={evidence}")
+        if result.skipped:
+            console.print(f"[dim]Skipped {len(result.skipped)} unresolved paths[/dim]")
+
+        hard_count = len(result.hard_failures())
+        if result.oauth_bad_password_ok is False:
+            hard_count += 1
+        return 0 if hard_count == 0 else 1
 
     raise typer.Exit(asyncio.run(_run()))
 
@@ -601,6 +761,103 @@ def users_api_cmd(
             )
         console.print(table)
         console.print(f"OK={result.ok_count} failed={result.fail_count}")
+        return 0 if result.fail_count == 0 else 1
+
+    raise typer.Exit(asyncio.run(_run()))
+
+
+_SETTINGS_CASES_OPTION = typer.Option(
+    None,
+    "--cases",
+    help=(
+        "Comma-separated case ids (S0-S12). "
+        "Default: all except S5; S6 needs --include-slow."
+    ),
+)
+_SETTINGS_INCLUDE_SLOW_OPTION = typer.Option(
+    False,
+    "--include-slow",
+    help="Include S5 (passwordResetTime) and S6 (idleLogout wait).",
+)
+_SETTINGS_RESTORE_OPTION = typer.Option(
+    True,
+    "--restore-defaults/--no-restore-defaults",
+    help="Restore baseline settings captured at S0 after the run.",
+)
+_SETTINGS_IDLE_WAIT_OPTION = typer.Option(
+    65.0,
+    "--idle-wait-seconds",
+    help="Seconds to wait for S6 idleLogout enforcement.",
+)
+_SETTINGS_PROTOCOL_OPTION = typer.Option(
+    None,
+    "--protocol",
+    help="Override smoke protocol for S8/S9/S10 upload tests.",
+)
+
+
+@crs_app.command("settings-suite")
+def settings_suite_cmd(
+    as_admin: str = typer.Option(
+        "flex_test_admin",
+        "--as-admin",
+        help="Admin fixture username for settings mutations.",
+    ),
+    as_operator: str = typer.Option(
+        "flex_test_operator",
+        "--as-operator",
+        help="Operator fixture username for gate-deny tests.",
+    ),
+    as_auditor: str = typer.Option(
+        "flex_test_auditor",
+        "--as-auditor",
+        help="Auditor fixture username for S12 read checks.",
+    ),
+    cases: str | None = _SETTINGS_CASES_OPTION,
+    include_slow: bool = _SETTINGS_INCLUDE_SLOW_OPTION,
+    restore_defaults: bool = _SETTINGS_RESTORE_OPTION,
+    idle_wait_seconds: float = _SETTINGS_IDLE_WAIT_OPTION,
+    protocol: Path | None = _SETTINGS_PROTOCOL_OPTION,
+) -> None:
+    """Run CRS auth settings behavior suite (GET/PATCH /auth/settings)."""
+
+    async def _run() -> int:
+        settings = await _settings_for_robot()
+        try:
+            selected = parse_case_ids(cases)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
+        result = await run_auth_settings_suite(
+            settings,
+            admin_username=as_admin,
+            operator_username=as_operator,
+            auditor_username=as_auditor,
+            cases=selected,
+            include_slow=include_slow,
+            restore_defaults=restore_defaults,
+            idle_wait_seconds=idle_wait_seconds,
+            protocol_path=protocol,
+        )
+        table = Table(title=f"CRS auth settings suite ({as_admin})")
+        table.add_column("Case")
+        table.add_column("Step")
+        table.add_column("OK")
+        table.add_column("Skipped")
+        table.add_column("Detail")
+        for step in result.steps:
+            table.add_row(
+                step.case_id,
+                step.name,
+                "yes" if step.ok else "no",
+                "yes" if step.skipped else "",
+                step.detail[:100],
+            )
+        console.print(table)
+        console.print(
+            f"OK={result.ok_count} failed={result.fail_count} "
+            f"skipped={result.skipped_count}"
+        )
         return 0 if result.fail_count == 0 else 1
 
     raise typer.Exit(asyncio.run(_run()))

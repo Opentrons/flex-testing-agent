@@ -2,15 +2,41 @@
 name: operate-kansasflex
 description: >-
   Operates the local Opentrons Flex KansasFLEX through flex-testing-agent CLI
-  and Python APIs. Use when inspecting robot state, probing read-only endpoints,
-  taking camera pictures, listing Flex OS releases, installing a robot OS build
-  with ALLOW_MUTATIONS, running Pyro / protocol-subprocess validation on
-  internal Flex builds, using the FTDI serial console (`flex-test serial`)
-  instead of Tabby, or archiving/reviewing diagnostic robot logs after
-  seed-runs / api-suite (`flex-test logs archive`).
+  and Python APIs only (never curl/ad-hoc robot HTTP). Use when inspecting
+  robot state, status (instruments/door/subsystems), waiting for health after
+  install, probing read-only endpoints, taking camera pictures, listing Flex
+  OS releases, installing a robot OS build with ALLOW_MUTATIONS, running Pyro
+  / protocol-subprocess validation, using the FTDI serial console
+  (`flex-test serial`) instead of Tabby, or archiving/reviewing diagnostic
+  robot logs after seed-runs / api-suite (`flex-test logs archive`).
 ---
 
 # Operate KansasFLEX
+
+## Hard rule: no ad-hoc robot HTTP
+
+**Do not** `curl`, `wget`, or raw `httpx` against `ROBOT_HOST` / robot ports.
+**Do not** invent robot URLs in agent glue.
+
+Use only:
+
+1. `uv run flex-test …` CLI, or
+2. Typed clients / capabilities via `FlexRobot` (`clients/` → `capabilities/`)
+
+If a needed call is missing, **extend the harness** (skill
+`extend-flex-harness`) instead of shelling out.
+
+| Need | Use |
+|------|-----|
+| Reachability / versions / CRS detect | `flex-test inspect` |
+| Instruments, door, subsystems | `flex-test status` |
+| Post-install / reboot wait for `/health` | `flex-test wait-health` |
+| Broad read-only GETs + optional picture | `flex-test probe` |
+| Run presence | `flex-test run-state` |
+| OS install | `flex-test put …` |
+| Logs | `flex-test logs list\|archive` |
+| CRS audit periods | `flex-test audit list\|download` |
+| Boot / DHCP / SSH down | `flex-test serial …` (not HTTP) |
 
 ## Prerequisites
 
@@ -20,12 +46,20 @@ description: >-
 - Mutations only when `.env` has `ALLOW_MUTATIONS=true`
 - CLI/runners **probe candidates** via `GET /health` and bind the live host
   (DHCP has moved KansasFLEX between `.20` and `.21`)
+- CRS on: set `ROBOT_USERNAME` / `ROBOT_PASSWORD` so mutating CLIs can OAuth
 
 ## Preferred commands
 
 ```bash
 # Read-only snapshot (also confirms host reachability)
 uv run flex-test inspect
+
+# Compact instruments / door / subsystems (typed clients; OAuth if CRS on)
+uv run flex-test status
+
+# After put/reboot while nginx may still 502: poll until /health 200
+uv run flex-test wait-health
+uv run flex-test wait-health --timeout 1200 --interval 5
 
 # Protocol-run presence (suites verify this; see docs/crs-testing.md)
 uv run flex-test run-state
@@ -57,8 +91,11 @@ uv run flex-test releases --channel internal
 
 # Install OS build (mutates; needs ALLOW_MUTATIONS=true); records timing JSON
 ALLOW_MUTATIONS=true uv run flex-test put 9.1.2-alpha.5 --channel external
-# Internal / ot3@ stack (Pyro subprocess builds):
-ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
+# Current Pyro / protocol-subprocess line (external 10.0.0-alpha.* =
+# former internal 4.0.0-alpha.*). Parent bug epic: RQA-5831.
+ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external
+# When CRS (access control) is on, set ROBOT_USERNAME / ROBOT_PASSWORD so put
+# can OAuth; otherwise update-server returns 401.
 
 # Known-state baseline (clear robot-server DB + Kansas deck; no play)
 ALLOW_MUTATIONS=true uv run flex-test reset-data
@@ -151,7 +188,7 @@ uv run flex-test logs archive
    3. Never leave a log-review bug with only a summary and no log excerpts on
       the ticket.
 
-## Post-install recovery (internal / Pyro builds)
+## Post-install recovery (Pyro / 10.0.0-alpha.* builds)
 
 After `put`, update-server may already show the new version while nginx `/health`
 returns **502** for several minutes (firmware flash + robot-server Pyro startup).
@@ -168,30 +205,51 @@ uv run flex-test serial shell
 uv run flex-test serial run "systemctl is-active opentrons-robot-server"
 ```
 
-3. Ordered recovery if still broken after FW idle:
+3. If still broken after FW idle: **full robot reboot** (power cycle or `reboot`),
+   then wait for `/health` 200 again. Do **not** prescribe ordered
+   `systemctl restart` of nameserver / hardware-api / robot-server as the
+   operator recovery path (those gaps are Low / expected: RQA-5789 / RQA-5790).
 
-```text
-opentrons-pyro-nameserver → opentrons-hardware-api → wait OT3API in NS → opentrons-robot-server
-```
+Full validation narrative: `docs/pyro-testing.md`. Checklist YAML:
+`docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml`.
+Bug epic for `10.0.0-alpha.1`: [RQA-5847](https://opentrons.atlassian.net/browse/RQA-5847)
+(alpha.0: [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831)).
+Triage / priority:
+[RBARM 10.0.0-alpha.1 triaging](https://opentrons.atlassian.net/wiki/spaces/RBARM/pages/6405062721).
 
-Full suite, SSH checks, restart failure modes, and live tip smoke:
-`docs/pyro-testing.md`. Checklist YAML:
-`docs/test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml`.
+### Filing bugs
+
+- Parent under RQA-5847 for alpha.1 (or the epic the user names).
+- **Do not file duplicates.** Search the triage page + open RQA bugs first; if a
+  match exists, **comment with evidence** on that ticket instead.
+- Write for **product developers**, not harness maintainers:
+  - Reproduction steps as **HTTP API calls** (method, path, headers, body).
+  - Paste **real response bodies** and relevant **server log excerpts** (journal,
+    robot-server, audit-server).
+  - Include **robot build**, CRS/access-control state, and robot serial when known.
+  - **Attach** protocol files, request payloads, and sample responses (Jira
+    attachments or inline in the description/comment when upload is unavailable).
+  - PR links are fine for **context**; do not rely on them as the repro.
+- Avoid harness-only vocab in Jira (`A4`/`C6`, `flex-test`, `api-suite`, CRS suite
+  letters, artifact paths under `artifacts/`).
+- Mention **full robot reboot** as recovery / workaround when relevant.
 
 ## Pyro / protocol-subprocess smoke
 
-On internal builds with `enableHardwareSubprocess` / `enableProtocolSubprocess`
-default on (`/data/feature_flags.json`):
+On external `10.0.0-alpha.*` (and historical internal `4.0.0-alpha.*`) builds with
+`enableHardwareSubprocess` / `enableProtocolSubprocess` default on
+(`/data/feature_flags.json`):
 
 - Prefer product HTTP (`/health`, `/instruments`, `/runs`, door status) over raw
   Pyro `Proxy` without the Opentrons Serpent type registry.
 - Store protocol/run IDs as **bare UUIDs** only (never `PROTO_ID=<uuid>` in files
   you `cat` into JSON).
-- Suites A–D: NS health, restart recovery (RQA-5789/5790), door, upload/analyze/create-run,
-  uncurrent leak (RQA-5791), serialization (see `docs/pyro-testing.md`).
+- Default checks: NS health, door, upload/analyze/create-run, uncurrent leak
+  (RQA-5791), serialization. **Skip** nameserver/hardware-api service-restart
+  experiments unless regressing a fix (see `docs/pyro-testing.md`).
 - On-robot Serpent registry over SSH: use writable `HOME` (e.g. `/tmp/ot-home`);
   `/root/.opentrons` is often read-only.
-- Helper: `scripts/run_pyro_d_suite.sh` (needs recovery if orphan `ot-protocol` processes linger).
+- Helper: `scripts/run_pyro_d_suite.sh` (full reboot if orphan processes linger).
 
 ## Live protocol play (physical motion)
 

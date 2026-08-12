@@ -124,6 +124,43 @@ Exercises catalogued scoped GET endpoints with no token and each fixture role
 200/404). **robot-server** scoped GETs are report-only on alpha builds until
 enforcement is complete.
 
+### 4b. CRS-on lockdown negative auth
+
+Complements **auth-matrix** (valid tokens, scoped GET allow/deny) with
+**negative** probes across methods and bad credentials:
+
+| Actor | What it tests |
+|-------|----------------|
+| `none` | No `Authorization` header |
+| `bad_bearer` | Invalid bearer string |
+| `malformed_bearer` | Non-JWT bearer |
+| `bad_oauth` | Wrong ROPC password on `POST /auth/oauth2/token` |
+| `auditor` | Read-only role must not mutate or read write-scoped data |
+| `operator` | User role must not hit admin-only scopes |
+
+```bash
+# Parameter-free catalog (all HTTP methods); summary output
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown
+
+# Include `{runId}` / `{protocolId}` paths with placeholder UUIDs
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --include-parameterized
+
+# Hard-fail only auth-server + audit-server
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --strict-only --show-failures
+
+# Pick actors
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --actors none,bad_bearer,auditor
+```
+
+**Strict services:** auth-server and audit-server mutations must return 401/403
+without valid credentials. **Report-only:** robot-server mutation gaps
+(non-401/403) are counted OK but printed in `--show-failures` for triage.
+**Mutation bypass:** POST/PATCH/PUT/DELETE returning 200/201/204 without valid
+credentials is always a failure. GET routes are reachable without credentials by
+design.
+
+Published checklist: `docs/test-suggestions/crs-on-lockdown-negative-auth.yaml`.
+
 ### 5. CRS-on Tier A (GET probe + user-management API)
 
 ```bash

@@ -1,0 +1,248 @@
+id: 10.0.0-alpha.1-release-delta
+title: Flex 10.0.0-alpha.1 release-delta validation (chore_release-10.0.0 since alpha.0)
+summary: >
+  Install-ready checklist for external v10.0.0-alpha.1 on KansasFLEX. Covers the
+  eight monorepo commits merged into chore_release-10.0.0 after v10.0.0-alpha.0
+  (PRs #22216–#22226), plus a short Pyro / protocol-subprocess regression from
+  the alpha.0 suite. File new product bugs under RQA-5847. Narrative helpers:
+  docs/pyro-testing.md and docs/robot-logs.md.
+status: validated
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: v10.0.0-alpha.0
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+    - key: RQA-5848
+      title: "GET /health diskDetails.runStartLimitFreeSpaceMb reports wrong threshold"
+    - key: RQA-5849
+      title: "CRS-on POST /protocols/{id}/analyses returns 500 AssertionError"
+    - key: RQA-5484
+      title: "10.0.0 Bugs"
+    - key: RQA-5843
+      title: "Run commands do not appear in robot log JSON in downloaded log period zip"
+    - key: RQA-5830
+      title: "Modules do not save calibration offsets"
+    - key: RQA-5818
+      title: "App: reanalyze protocol doesn't work unless you refresh/restart app"
+    - key: EXEC-2877
+      title: "Gate protocol analysis creation/deletion behind access control"
+    - key: EXEC-2663
+      title: "Add filesystem storage usage management to the audit server"
+    - key: RQA-5846
+      title: "POST /runs intermittently 500: Can't resolve pyro proxy ot-protocol_<uuid>"
+    - key: RQA-5835
+      title: "[Pyro and APP]: Robot becomes unreachable through the app after running and/or device reset"
+  prs:
+    - number: 22216
+      title: "feat(audit-server): add disk usage monitoring"
+      url: https://github.com/Opentrons/opentrons/pull/22216
+    - number: 22217
+      title: "feat(app): audit logs UI updates"
+      url: https://github.com/Opentrons/opentrons/pull/22217
+    - number: 22221
+      title: "refactor(app,robot-server): move disk status to server"
+      url: https://github.com/Opentrons/opentrons/pull/22221
+    - number: 22213
+      title: "fix(app,robot-server): Require authentication and documentation for robot-side protocol analysis"
+      url: https://github.com/Opentrons/opentrons/pull/22213
+    - number: 22224
+      title: "fix(robot-server): clearing a run in pyro returns actual data for commands and other run result properties"
+      url: https://github.com/Opentrons/opentrons/pull/22224
+    - number: 22226
+      title: "fix(server-utils): update period id type"
+      url: https://github.com/Opentrons/opentrons/pull/22226
+    - number: 22215
+      title: "fix(api): Stop caching module offsets across pyro processes"
+      url: https://github.com/Opentrons/opentrons/pull/22215
+    - number: 22222
+      title: "fix(app): fix stale analysis RTPs in ChooseRobotToRunProtocolSlideout"
+      url: https://github.com/Opentrons/opentrons/pull/22222
+hardware_required:
+  - flex_1channel_50 (right) or existing KansasFLEX pipettes
+  - temperatureModuleV2 or thermocyclerModuleV2 (for module-offset fix only)
+  - protocol with runtime parameters (for App RTP slideout only)
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test status
+    - uv run flex-test releases
+    - ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.1 --channel external
+    - uv run flex-test wait-health --timeout 1200 --interval 5
+    - uv run flex-test probe --no-picture
+    - ALLOW_MUTATIONS=true uv run flex-test api-suite
+    - uv run flex-test audit list
+    - uv run flex-test audit download <periodId>
+    - uv run flex-test logs archive
+tests:
+  - id: I0
+    name: Confirm build published then install
+    why: External CDN already lists 10.0.0-alpha.1 / v10.0.0-alpha.1; install before fix validation.
+    steps:
+      - "uv run flex-test releases (external alpha lane should show 10.0.0-alpha.1)."
+      - "uv run flex-test inspect (record current host / version; DHCP may move KansasFLEX)."
+      - "ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.1 --channel external (CRS-on needs ROBOT_USERNAME/PASSWORD)."
+      - "uv run flex-test wait-health --timeout 1200; expect GET /health 200 and API version 10.0.0-alpha.1."
+      - "If still 502 after several minutes: full robot reboot, then wait-health again (RQA-5787 class)."
+    result: pass
+    notes: "2026-08-12 KansasFLEX put succeeded; resulting v10.0.0-alpha.1; host 192.168.0.21; CRS off."
+
+  - id: A1
+    name: Pyro stack healthy after install
+    why: Regression gate; alpha.1 still ships enableHardwareSubprocess + enableProtocolSubprocess.
+    steps:
+      - "SSH or serial: systemctl is-active opentrons-pyro-nameserver opentrons-hardware-api opentrons-robot-server."
+      - "Confirm /data/feature_flags.json has both subprocess flags true."
+      - "GET /health, /instruments, /subsystems/status, /robot/door/status via flex-test inspect|status|probe."
+    result: pass
+    notes: "All three units active; enableHardwareSubprocess/enableProtocolSubprocess true; NS OT3API + robot-server-resource."
+
+  - id: A2
+    name: Create-run / analysis smoke (no motion)
+    why: Catch RQA-5846-class ot-protocol resolve failures early before longer suites.
+    steps:
+      - "Upload docs/test-suggestions/protocols/pyro_smoke_no_motion.py; wait analysis completed."
+      - "POST /runs; expect 201; NS shows ot-protocol_<uuid> (or equivalent)."
+      - "Stop the idle run; note any 500 Can't resolve pyro proxy (file under RQA-5847 if new)."
+    result: pass
+    notes: "Upload/analyze/create-run 201; play succeeded (home+comment). Later api-suite Tier C hit RQA-5846."
+
+  - id: F1
+    name: Cleared run retains commands (RQA-5843 / #22224)
+    why: >
+      Pyro clear_pyro used to return empty stub commands/parameters/annotations and
+      skip clear_command_history; audit run-log JSON then looked empty.
+    steps:
+      - "CRS on preferred (matches discovery path). Create a current run from a protocol that produces commands."
+      - "Prefer a short non-motion protocol, or seed_simple_home_move only if live motion is explicitly approved."
+      - "Play or otherwise populate command history; confirm GET /runs/{id}/commands is non-empty while current."
+      - "Stop / uncurrent (CRS-on may need run signoff). Confirm GET /runs/{id}/commands still returns the real command list (not empty stubs)."
+      - "Also check parameters / commandAnnotations / commandPreconditions are present when expected."
+      - "uv run flex-test audit list; download the period covering the run; unzip and confirm robot run-log JSON contains those commands (RQA-5843)."
+    result: pass
+    notes: >
+      CRS-on disruptive retest 2026-08-12: play+signoff+uncurrent kept 2 commands
+      (home, comment). audit download period 20 zip contains full command list
+      (RQA-5843 fix confirmed on audit path). Evidence:
+      artifacts/pyro-tests/alpha1-audit-20.zip,
+      artifacts/pyro-tests/alpha1-crs-on-f3-f6-f1.json.
+
+  - id: F2
+    name: Health diskDetails + CRS low-space run gate (#22221)
+    why: >
+      Server now owns disk status in GET /health (runStartLimitFreeSpaceMb,
+      isDiskSpaceBelowRunStartLimit). With CRS on, POST /runs returns 507 when
+      free space is below the limit (~2048 MB default).
+    steps:
+      - "GET /health; confirm diskDetails includes systemAvailableMb, systemTotalMb, imagesDirectorySizeMb, runStartLimitFreeSpaceMb, isDiskSpaceBelowRunStartLimit."
+      - "Normal free space: isDiskSpaceBelowRunStartLimit false; POST /runs still works."
+      - "Optional stress (disruptive): create a large file under /data until free < runStartLimitFreeSpaceMb."
+      - "CRS on: POST /runs → 507 Insufficient Storage (NoSpaceForRun). CRS off: run create still allowed (per PR test plan)."
+      - "Remove the filler file; confirm health flag clears and runs work again."
+    result: pass
+    notes: >
+      diskDetails present (RQA-5848: runStartLimitFreeSpaceMb=250 vs gate 2048).
+      Disruptive fill 2026-08-12: ~1.5GB free, isDiskSpaceBelowRunStartLimit true.
+      CRS off POST /runs → 201; CRS on → 507. Filler removed; /data recovered.
+      Evidence: artifacts/pyro-tests/alpha1-f2-disk-stress-crs-off.json,
+      alpha1-f2-disk-stress-crs-on.json.
+
+  - id: F3
+    name: CRS analysis requires auth + reason (#22213 / EXEC-2877)
+    why: POST /protocols/{id}/analyses is now access-control gated when CRS is on.
+    steps:
+      - "CRS on. Upload a protocol (labware-free comment-only protocol is fine for reanalysis UX)."
+      - "Unauthenticated POST /protocols/{id}/analyses → reject (401/403 class)."
+      - "Authenticated analysis without Opentrons-User-Notes when requireReasonForInteraction is true → expect documentation/reason enforcement per CRS settings."
+      - "Authenticated + reason → analysis created and completes."
+      - "App/ODD smoke: clone run / confirm RTP values / LPC setup should prompt login+documentation modal before reanalysis."
+    result: fail
+    notes: >
+      CRS enabled 2026-08-12. Unauthenticated POST /protocols/{id}/analyses → 401
+      (pass). Authenticated with/without Opentrons-User-Notes → 500
+      (AssertionError _coordinator is None). Bug: RQA-5849. App/ODD reanalysis
+      modal not exercised.
+
+  - id: F4
+    name: Module offsets visible after calibration (#22215 / RQA-5830)
+    why: >
+      Process-local LRU cache made GET /modules serve stale empty offsets under
+      Pyro (HW process writes JSON; robot-server read cached miss).
+    steps:
+      - "Attach temperature or thermocycler module."
+      - "Calibrate / complete module setup on ODD or App."
+      - "Without reboot: GET /modules (or App setup UI) must show calibrated offsets, not empty/missing."
+      - "Optional: calibrate module A, start setup for module B; A must still appear calibrated."
+    result: skipped
+    notes: "Heater-shaker HSDVT22041138 attached; moduleOffset null; no calibration performed this session."
+
+  - id: F5
+    name: Audit logs File Manager UI (#22217)
+    why: Rename Compliance Ready files → Audit logs; new columns; priority placement.
+    steps:
+      - "CRS on. Desktop App → robot settings → File Manager."
+      - "Expect section titled Audit logs, placed directly under robot storage; columns protocol (or N/A), start, end; no status column."
+      - "ODD File Manager: Audit Logs is first/preselected tab with the same columns."
+      - "After a protocol run in an audit period, protocol name should resolve when run record links logPeriodId."
+    result: skipped
+    notes: "Needs CRS on + App/ODD File Manager."
+
+  - id: F6
+    name: Audit period id / download smoke (#22226 + #22216)
+    why: Period id string typing + audit-server disk usage monitoring must not break list/download.
+    steps:
+      - "uv run flex-test audit list (CRS on)."
+      - "Download a recent period via flex-test audit download <id>; zip opens; actions summarize."
+      - "No 500 / type-coercion errors around period ids."
+    result: pass
+    notes: >
+      CRS on 2026-08-12: audit list 20 periods; download period 20 (12549 bytes)
+      opens; run-log JSON present. Evidence: artifacts/pyro-tests/alpha1-audit-20.zip.
+
+  - id: F7
+    name: App RTP slideout after reanalyze (#22222 / RQA-5818)
+    why: ChooseRobotToRunProtocolSlideout must show updated RTPs after a new analysis without app restart.
+    steps:
+      - "Desktop App: open a protocol with runtime parameters; note RTP options."
+      - "Change protocol RTP defaults / remove an option; reanalyze on the robot or via App."
+      - "Open Choose robot / run slideout without restarting the App; expect updated RTP set (stale options gone)."
+    result: skipped
+    notes: "App-only RTP slideout; not run this session."
+
+  - id: R1
+    name: CRS-off api-suite regression
+    why: Broad HTTP coverage; previously surfaced RQA-5845 (dup) and RQA-5846.
+    steps:
+      - "Prefer CRS off for this pass (or document CRS-on skips)."
+      - "ALLOW_MUTATIONS=true uv run flex-test api-suite."
+      - "Watch Tier C create-run for intermittent ot-protocol resolve 500 (RQA-5846)."
+      - "Missing commandAnnotation id should be 404 not 500 (RQA-5825 / RQA-5845 class)."
+      - "uv run flex-test logs archive; write review.md; file new defects under RQA-5847."
+    result: fail
+    notes: "A 52/0, B 34/0, C 6/1. Tier C POST /runs 500 ot-protocol resolve (RQA-5846). Missing annotation historical → 404."
+
+  - id: R2
+    name: Open alpha.0 pyro bugs still present?
+    why: Confirm whether alpha.1 fixed or still carries RQA-5846 / RQA-5835 / uncurrent orphans.
+    steps:
+      - "Retest intermittent POST /runs proxy resolve (RQA-5846) after create/uncurrent cycles."
+      - "If device reset / long run path is available: recheck App reachability (RQA-5835)."
+      - "Uncurrent teardown / orphan run_process_entry_point (RQA-5791 class); CRS-on may need signoff."
+      - "Update tickets; do not close without evidence on alpha.1."
+    result: fail
+    notes: >
+      Post-reboot orphan cleanup done. RQA-5846 not retested this pass. CRS-on
+      disruptive path completed (disk gate, audit, F1). RQA-5835 device reset +
+      App reachability still needs ODD device reset + Desktop App. F4 module calibrate
+      and F5/F7 App/ODD UI still manual.
+
+notes: >
+  Validated 2026-08-12 on KansasFLEX. CRS enabled during disruptive pass (one-way).
+  Bug epic: RQA-5847. Triage SSOT:
+  Confluence RBARM "10.0.0-alpha.1 triaging/organizing tickets". Process: search
+  existing RQA bugs first; retest with comments + evidence; file new Bugs only
+  when no match (RQA-5848 is new #22221 field/gate mismatch, not a dup of
+  RQA-5834). Retest comments: RQA-5843, RQA-5846, RQA-5728, RQA-5825.
+  Evidence: artifacts/logs/20260812T150556Z-192.168.0.21/review.md

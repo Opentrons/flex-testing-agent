@@ -1,0 +1,196 @@
+id: crs-auth-settings-behavior
+title: CRS auth settings behavior and combination matrix
+summary: >
+  Exercise every field returned by GET /auth/settings on a CRS-enabled Flex build,
+  verify API enforcement (not just ODD/App UX), and run a small combination matrix
+  for requireAdminCreds* flags. Maps to QA checklist section 8 (Settings and
+  Tunables). File product bugs under RQA-5847 with HTTP repro steps and response
+  bodies; do not use harness-only vocabulary in Jira.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+    - key: RQA-5841
+      title: "CRS clarification: requireReasonForInteraction bypass via direct API"
+hardware_required:
+  - flex (CRS-enabled lab robot or dedicated lockout target)
+  - HTTPS CA trust (ROBOT_USE_HTTPS=true)
+harness:
+  commands:
+    - ROBOT_USE_HTTPS=true uv run flex-test inspect
+    - ROBOT_USE_HTTPS=true uv run flex-test crs provision-users
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs user-management
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite --cases S1,S7 --restore-defaults
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite --include-slow --idle-wait-seconds 65
+notes: >
+  Settings under test (GET /auth/settings data object):
+    maxNumberOfLoginAttempts, passwordResetTime,
+    passwordComplexityMinimumLength, passwordComplexitySpecialCharacters,
+    idleLogout, requireAdminCredsWhenUpdatingRobotSoftware,
+    requireAdminCredsWhenSendingProtocolToRobot,
+    requireAdminCredsForSignoffProtocol.
+  Out of scope here (audit-server): requireReasonForInteraction and reason
+  min-length (see RQA-5841; audit PATCH /audit/external/settings).
+  Harness workstream: extend AuthSettingsClient (GET/PATCH/DELETE), ephemeral
+  users for login-attempt tests, snapshot/restore defaults after each case.
+  Time-dependent cases (idleLogout, passwordResetTime) need short tunables or
+  a dedicated robot; mark blocked if product minimums prevent lab-safe values.
+tests:
+  - id: S0
+    name: Preconditions and settings baseline
+    why: Confirm CRS on, fixture roles, and readable settings envelope before mutations.
+    steps:
+      - GET /auth/settings/accessControlEnabled → accessControlEnabled true
+      - GET /auth/settings with admin bearer (auth_settings.read or bootstrap admin) → record full data object
+      - Confirm flex_test_admin and flex_test_operator exist (provision-users if missing)
+      - POST /auth/oauth2/token grant_type=password for flex_test_admin and flex_test_operator; save tokens
+      - Optional ODD spot-check that displayed settings match GET /auth/settings
+    result: skipped
+
+  - id: S1
+    name: maxNumberOfLoginAttempts
+    why: QA checklist — account deactivates after configured failed logins.
+    steps:
+      - Admin PATCH /auth/settings {"data":{"maxNumberOfLoginAttempts":3}}
+      - GET /auth/settings → confirm 3
+      - Create ephemeral user flex_harness_login_attempts (user role) via POST /auth/users
+      - POST /auth/oauth2/token with wrong password ×3 for that user → expect invalid_grant each time
+      - GET /auth/users/byUsername/flex_harness_login_attempts as admin → account deactivated
+      - Admin PATCH reactivate user; restore maxNumberOfLoginAttempts to baseline (5 or DELETE /auth/settings)
+    result: skipped
+
+  - id: S2
+    name: passwordComplexityMinimumLength
+    why: QA checklist — minimum length enforced when configured.
+    steps:
+      - Admin PATCH /auth/settings {"data":{"passwordComplexityMinimumLength":12}}
+      - Admin POST /auth/users with password shorter than 12 chars → expect 422 with validation error
+      - Ephemeral user changes password via PATCH /auth/users/self with 11-char password → expect 422
+      - Same with 12+ char password → expect 200
+      - Restore passwordComplexityMinimumLength null (PATCH or DELETE settings)
+    result: skipped
+
+  - id: S3
+    name: passwordComplexitySpecialCharacters
+    why: QA checklist — special-character rule enforced when configured.
+    steps:
+      - Admin PATCH /auth/settings {"data":{"passwordComplexitySpecialCharacters":1}}
+      - Try set password without special characters (e.g. LongPasswordOnly1) → expect 422
+      - Try set password with special character (e.g. LongPasswordOnly1!) → expect 200
+      - Restore passwordComplexitySpecialCharacters null
+    result: skipped
+
+  - id: S4
+    name: Password complexity combination
+    why: Both length and special-char rules apply together when both non-null.
+    steps:
+      - Admin PATCH /auth/settings {"data":{"passwordComplexityMinimumLength":10,"passwordComplexitySpecialCharacters":1}}
+      - Reject password TooShort! (length)
+      - Reject password LongEnoughNoSpecial (no special)
+      - Accept password LongEnough1! (both satisfied)
+      - Restore both fields null
+    result: skipped
+
+  - id: S5
+    name: passwordResetTime
+    why: QA checklist — password expiry period respected (product-defined units).
+    steps:
+      - Document baseline passwordResetTime from GET /auth/settings (often null = disabled)
+      - If product allows lab-safe short expiry, PATCH to minimum allowed value
+      - Create or use user with known password; advance clock or wait until expiry window
+      - Login after expiry → expect forced reset flow (resetPassword flag, limited token scope)
+      - Restore passwordResetTime null
+    result: skipped
+    notes: >
+      Often blocked in lab automation without clock control or documented minimum
+      expiry. Prefer manual ODD/App pass or staging with adjustable system time.
+
+  - id: S6
+    name: idleLogout
+    why: QA checklist — auto logout after configured idle period; activity refreshes session.
+    steps:
+      - Record baseline idleLogout (default often 180 seconds)
+      - Admin PATCH /auth/settings {"data":{"idleLogout":60}} if product allows
+      - Login as flex_test_operator; save access_token
+      - Wait >60s with no authenticated API calls
+      - GET /auth/users/self or GET /instruments with stale token → expect 401 or introspect active=false
+      - Login again; perform authenticated GET within idle window → token still valid before timeout
+      - Restore idleLogout baseline
+    result: skipped
+    notes: >
+      Confirm whether refresh-token or any API call resets idle timer (QA checklist
+      mentions activity refresh). Capture POST /auth/oauth2/introspect before/after wait.
+
+  - id: S7
+    name: requireAdminCredsWhenUpdatingRobotSoftware
+    why: QA checklist — non-admin blocked from robot software update when true.
+    steps:
+      - Ensure setting true (default on KansasFLEX alpha.1)
+      - Operator bearer POST /server/update/begin (no body or documented body) → expect 403 Forbidden (or documented admin-only error)
+      - Admin bearer same request → expect 200/201 session created (do not commit install)
+      - Admin PATCH setting false; repeat operator request → expect success or product-documented behavior
+      - Restore requireAdminCredsWhenUpdatingRobotSoftware true
+    result: skipped
+
+  - id: S8
+    name: requireAdminCredsWhenSendingProtocolToRobot
+    why: QA checklist — non-admin blocked from sending protocols when true.
+    steps:
+      - Ensure setting true
+      - Operator bearer POST /protocols multipart (pyro_smoke_no_motion.py) → expect 403 (or documented denial)
+      - Admin bearer same upload → expect 201 with protocol id
+      - Admin PATCH setting false; operator upload → expect 201
+      - Restore requireAdminCredsWhenSendingProtocolToRobot true
+    result: skipped
+    notes: >
+      Confirm exact gated route with monorepo auth middleware (may include POST /runs
+      or analyze paths on some builds). Record actual status + response body.
+
+  - id: S9
+    name: requireAdminCredsForSignoffProtocol
+    why: QA checklist — protocol log signoff requires admin when true.
+    steps:
+      - Admin PATCH /auth/settings {"data":{"requireAdminCredsForSignoffProtocol":true}}
+      - Create current idle run as admin (POST /runs with known protocolId)
+      - Operator bearer PATCH /runs/{runId} {"data":{"signedBy":"Operator Name"}} → expect 403
+      - Admin bearer same PATCH → expect 200 and signedOff metadata present
+      - Admin PATCH setting false; operator signoff → expect 200
+      - Uncurrent/stop run; restore requireAdminCredsForSignoffProtocol false
+    result: skipped
+
+  - id: S10
+    name: requireAdminCreds combination matrix
+    why: Consequential interactions when multiple admin-credential gates are enabled.
+    steps:
+      - Admin PATCH all three requireAdminCreds* to true
+      - As flex_test_operator verify blocked on update begin, protocol upload, and run signoff (S7–S9)
+      - As flex_test_admin verify all three succeed (update begin only opened, not committed)
+      - Toggle only requireAdminCredsForSignoffProtocol false; confirm operator can signoff but still blocked on upload/update
+      - Toggle only requireAdminCredsWhenSendingProtocolToRobot false; confirm operator can upload but not update/signoff per remaining flags
+      - Restore all three to product defaults from S0 snapshot
+    result: skipped
+
+  - id: S11
+    name: Settings persistence and restore
+    why: PATCH partial updates must merge; DELETE or PATCH restores defaults without breaking CRS.
+    steps:
+      - PATCH single field (e.g. idleLogout 120); GET confirms merge leaves other fields unchanged
+      - DELETE /auth/settings as admin → GET shows factory defaults; accessControlEnabled remains true
+      - Re-apply lab baseline from S0 snapshot via PATCH
+    result: skipped
+
+  - id: S12
+    name: Authorization on settings routes (CRS enforcement)
+    why: Mutations require credentials when CRS on; GET remains readable without auth.
+    steps:
+      - GET /auth/settings without Authorization → expect 200 with policy body
+      - PATCH /auth/settings without Authorization → expect 401/403
+      - Operator token PATCH /auth/settings → expect 403 (lacks auth_settings.write)
+      - Auditor token GET /auth/settings → expect 200
+    result: skipped

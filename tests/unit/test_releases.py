@@ -7,7 +7,10 @@ import pytest
 import respx
 
 from flex_testing_agent.releases.catalog import build_catalog, summarize_latest
-from flex_testing_agent.releases.client import fetch_flex_release_summary
+from flex_testing_agent.releases.client import (
+    fetch_flex_release_summary,
+    fetch_robot_manifest,
+)
 from flex_testing_agent.releases.urls import ReleaseChannel, robot_releases_json_url
 from flex_testing_agent.releases.versions import (
     ReleaseStability,
@@ -126,6 +129,36 @@ def test_summarize_latest_prefers_higher_semver() -> None:
     assert latest.beta is not None and latest.beta.version == "4.0.0-beta.1"
     assert latest.alpha is not None and latest.alpha.version == "4.0.0-alpha.5"
     assert latest.stable is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_robot_manifest_avoids_stale_gzip_edge_cache() -> None:
+    """Prefer identity encoding so CloudFront gzip objects do not hide new keys."""
+    route = respx.get(robot_releases_json_url(ReleaseChannel.EXTERNAL)).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "productionV2": {
+                    "10.0.0-alpha.0": {
+                        "fullImage": "https://e/full",
+                        "system": "https://e/sys",
+                        "version": "https://e/ver",
+                        "releaseNotes": "https://e/notes",
+                    }
+                }
+            },
+        )
+    )
+    manifest, error = await fetch_robot_manifest(ReleaseChannel.EXTERNAL)
+    assert error is None
+    assert manifest is not None
+    assert "10.0.0-alpha.0" in manifest["productionV2"]
+    assert route.calls
+    headers = route.calls.last.request.headers
+    assert headers.get("accept-encoding") == "identity"
+    assert headers.get("cache-control") == "no-cache"
 
 
 @pytest.mark.unit

@@ -15,6 +15,11 @@ from flex_testing_agent.models.access_control import (
     AccessControlState,
     AccessControlStatus,
 )
+from flex_testing_agent.models.auth_settings import (
+    AuthSettingsData,
+    AuthSettingsPatch,
+    AuthSettingsResourceResponse,
+)
 
 
 class AuthSettingsClient:
@@ -99,3 +104,47 @@ class AuthSettingsClient:
             ),
             raw_enabled=enabled,
         )
+
+    async def get_settings(self, *, timeout: float | None = None) -> AuthSettingsData:
+        """GET ``/auth/settings`` policy object."""
+        payload = await self._session.get_json(
+            "/auth/settings",
+            timeout=timeout,
+        )
+        envelope = AuthSettingsResourceResponse.model_validate(payload)
+        return envelope.data
+
+    async def patch_settings(
+        self,
+        patch: AuthSettingsPatch | dict[str, Any],
+        *,
+        timeout: float | None = None,
+        expected_status: tuple[int, ...] | None = None,
+    ) -> AuthSettingsData:
+        """PATCH ``/auth/settings`` with a partial ``data`` object."""
+        if isinstance(patch, AuthSettingsPatch):
+            body = patch.to_request_body()
+        else:
+            body = {"data": patch}
+        payload = await self._session.patch_json(
+            "/auth/settings",
+            json_body=body,
+            timeout=timeout,
+            expected_status=expected_status or (200,),
+        )
+        envelope = AuthSettingsResourceResponse.model_validate(payload)
+        return envelope.data
+
+    async def delete_settings(
+        self, *, timeout: float | None = None
+    ) -> AuthSettingsData:
+        """DELETE ``/auth/settings`` (restore factory defaults)."""
+        payload = await self._session.delete_json(
+            "/auth/settings",
+            timeout=timeout,
+            expected_status=(200, 204),
+        )
+        if not payload:
+            return await self.get_settings(timeout=timeout)
+        envelope = AuthSettingsResourceResponse.model_validate(payload)
+        return envelope.data
