@@ -24,7 +24,7 @@ harness:
   commands:
     - ROBOT_USE_HTTPS=true uv run flex-test inspect
     - ROBOT_USE_HTTPS=true uv run flex-test crs provision-users
-    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs user-management
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
     - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
     - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite --cases S1,S7 --restore-defaults
     - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite --include-slow --idle-wait-seconds 65

@@ -272,7 +272,7 @@ FLEX_HTTP_ENDPOINTS: tuple[EndpointSpec, ...] = (
         risk_level=RiskLevel.DISRUPTIVE,
         required_scopes=("auth_settings.write",),
         blocked=True,
-        notes="ONE-WAY CRS enable. Harness never calls this.",
+        notes="ONE-WAY CRS enable. Probes skip; use crs enable --confirm-one-way.",
         crs_off_acceptable_status=(
             200,
             201,

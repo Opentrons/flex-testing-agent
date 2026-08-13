@@ -31,7 +31,7 @@ def ensure_mutation_allowed(
 
     Dry-run also blocks mutations. ``PHYSICAL_MOTION`` is allowed only when
     mutations are enabled (operator-requested capabilities such as
-    ``seed_runs``); it is never the default path.
+    ``seed_runs`` and ``lpc_jog_timing``); it is never the default path.
     """
     if risk_level not in MUTATING_RISKS:
         return

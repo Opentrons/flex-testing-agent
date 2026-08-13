@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from flex_testing_agent.capabilities.crs_auth import access_token_for_username
 from flex_testing_agent.capabilities.descriptor import CapabilityDescriptor
+from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.oauth import OAuthClient
 from flex_testing_agent.clients.users import UsersClient
 from flex_testing_agent.config.settings import Settings
@@ -26,12 +27,17 @@ from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
 from flex_testing_agent.robots.flex import FlexRobot
 
+_DENY_STATUSES = (401, 403)
+_REJECT_STATUSES = (400, 401, 409, 422)
+
 USER_MANAGEMENT_SUITE = CapabilityDescriptor(
     name="crs_on_user_management",
     description=(
         "CRS-on auth-server user CRUD suite: POST/GET/PATCH/DELETE users, "
-        "resetPassword, self routes, and OAuth introspect. Idempotent setup "
-        "creates a throwaway flex_harness_um_crud account."
+        "account-type change, duplicate-username reject, non-admin 403, "
+        "resetPassword (original + temp one-use), self routes, and OAuth "
+        "introspect. Idempotent setup creates a throwaway "
+        "flex_harness_um_crud account."
     ),
     risk_level=RiskLevel.REVERSIBLE_MUTATION,
     mutates_robot=True,
@@ -42,6 +48,7 @@ USER_MANAGEMENT_SUITE = CapabilityDescriptor(
         "CRS / accessControlEnabled is true",
         "ROBOT_USE_HTTPS=true and CA trust configured",
         "Bootstrap admin OAuth (flex_harness_admin)",
+        "Operator fixture (flex_test_operator) for non-admin 403 checks",
     ],
 )
 
@@ -75,6 +82,7 @@ async def run_user_management_suite(
     settings: Settings,
     *,
     admin_username: str = "flex_harness_admin",
+    operator_username: str = "flex_test_operator",
 ) -> UserManagementSuiteResult:
     """Run idempotent user-management API coverage on a CRS-enabled robot."""
     ensure_mutation_allowed(
@@ -84,6 +92,7 @@ async def run_user_management_suite(
     )
     spec = EphemeralUserSpec.default()
     admin_token = await access_token_for_username(settings, admin_username)
+    operator_token = await access_token_for_username(settings, operator_username)
 
     async with FlexRobot(settings, access_token=admin_token) as robot:
         users = UsersClient(robot.session)
@@ -147,6 +156,36 @@ async def run_user_management_suite(
             _get_self(users, access_token=subject_token),
         )
         await record(
+            "post_duplicate_username_rejected",
+            "POST",
+            "/auth/users",
+            _duplicate_username_rejected(users, spec, admin_token=admin_token),
+        )
+        await record(
+            "patch_account_type",
+            "PATCH",
+            f"/auth/users/byUsername/{spec.username}",
+            _patch_account_type_roundtrip(
+                users, spec.username, admin_token=admin_token
+            ),
+        )
+        await record(
+            "operator_patch_forbidden",
+            "PATCH",
+            f"/auth/users/byUsername/{spec.username}",
+            _operator_patch_forbidden(
+                users, spec.username, operator_token=operator_token
+            ),
+        )
+        await record(
+            "operator_delete_forbidden",
+            "DELETE",
+            f"/auth/users/byUsername/{spec.username}",
+            _operator_delete_forbidden(
+                users, spec.username, operator_token=operator_token
+            ),
+        )
+        await record(
             "patch_by_username_profile",
             "PATCH",
             f"/auth/users/byUsername/{spec.username}",
@@ -188,6 +227,12 @@ async def run_user_management_suite(
         )
 
         if temp_password is not None:
+            await record(
+                "original_password_rejected_after_reset",
+                "POST",
+                "/auth/oauth2/token",
+                _password_rejected(oauth, current_username, spec.password),
+            )
             subject_token = await token_for_user(
                 oauth,
                 current_username,
@@ -206,6 +251,12 @@ async def run_user_management_suite(
             )
             if steps[-1].ok:
                 current_password = rotated
+                await record(
+                    "temp_password_rejected_after_rotation",
+                    "POST",
+                    "/auth/oauth2/token",
+                    _password_rejected(oauth, current_username, temp_password),
+                )
                 subject_token = await token_for_user(
                     oauth,
                     current_username,
@@ -263,6 +314,98 @@ async def _create(
 ) -> str:
     await ensure_user_present(users, spec, admin_token=admin_token)
     return f"username={spec.username} accountType={spec.account_type}"
+
+
+async def _duplicate_username_rejected(
+    users: UsersClient,
+    spec: EphemeralUserSpec,
+    *,
+    admin_token: str,
+) -> str:
+    try:
+        await users.create_user(
+            username=spec.username,
+            password=spec.password,
+            full_name="Duplicate should fail",
+            account_type=spec.account_type,
+            access_token=admin_token,
+        )
+    except RobotApiError as exc:
+        if exc.status_code in _REJECT_STATUSES:
+            return f"rejected status={exc.status_code}"
+        raise
+    raise AssertionError(f"expected duplicate username {spec.username!r} to fail")
+
+
+async def _patch_account_type_roundtrip(
+    users: UsersClient,
+    username: str,
+    *,
+    admin_token: str,
+) -> str:
+    auditor = await users.update_user(
+        username,
+        UpdateUserRequest(accountType="auditor"),
+        access_token=admin_token,
+    )
+    if auditor.account_type != "auditor":
+        raise AssertionError(f"expected auditor, got {auditor.account_type}")
+    restored = await users.update_user(
+        username,
+        UpdateUserRequest(accountType="user"),
+        access_token=admin_token,
+    )
+    if restored.account_type != "user":
+        raise AssertionError(f"expected user, got {restored.account_type}")
+    return "auditor then user"
+
+
+async def _operator_patch_forbidden(
+    users: UsersClient,
+    username: str,
+    *,
+    operator_token: str,
+) -> str:
+    try:
+        await users.update_user(
+            username,
+            UpdateUserRequest(fullName="Operator should not write"),
+            access_token=operator_token,
+        )
+    except RobotApiError as exc:
+        if exc.status_code in _DENY_STATUSES:
+            return f"denied status={exc.status_code}"
+        raise
+    raise AssertionError("expected operator PATCH users to be denied")
+
+
+async def _operator_delete_forbidden(
+    users: UsersClient,
+    username: str,
+    *,
+    operator_token: str,
+) -> str:
+    try:
+        await users.delete_user(username, access_token=operator_token)
+    except RobotApiError as exc:
+        if exc.status_code in _DENY_STATUSES:
+            return f"denied status={exc.status_code}"
+        raise
+    raise AssertionError("expected operator DELETE users to be denied")
+
+
+async def _password_rejected(
+    oauth: OAuthClient,
+    username: str,
+    password: str,
+) -> str:
+    try:
+        await oauth.get_token(username, password)
+    except RobotApiError as exc:
+        if exc.status_code in _REJECT_STATUSES:
+            return f"rejected status={exc.status_code}"
+        raise
+    raise AssertionError(f"expected ROPC to fail for {username!r}")
 
 
 async def _get_by_username(

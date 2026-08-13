@@ -52,7 +52,7 @@ Harness target: **Python 3.12+**.
 | Expected errors | 404 if auth-server route absent on older builds; 401/403 when AC on without token |
 | Tests | `auth-server/tests/integration/test_settings.tavern.yaml` and related auth integration tests |
 | Critical constraint | `PATCH` accepts only `accessControlEnabled: true` (`Literal[True]`). Once set, cannot be modified via API (`AccessControlAlreadySetError` / HTTP 422). Disable requires Opentrons assistance or SSH wipe of auth-server data (prior art). |
-| Harness policy | **Detect only. Never PATCH.** |
+| Harness policy | Detect on all paths. Enable only via `flex-test crs enable --confirm-one-way`. Catalog probes never PATCH this route. |
 
 ## Flex release manifests (robot-stack)
 

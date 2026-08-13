@@ -11,7 +11,7 @@ The core product is a reusable Python harness. Cursor, MCP, and other agent runt
 
 - Connect to and inspect a local Flex robot
 - Interact with existing robot HTTP APIs and services
-- Detect access-control state (read-only in milestone 1)
+- Detect access-control state; CRS-off and CRS-on HTTP suites
 - Understand published Flex robot OS versions (internal vs external; alpha/beta/stable)
 - Persist runs, snapshots, evidence, and findings
 - Support deterministic scenarios now, and bounded agent exploration later
@@ -23,8 +23,10 @@ Implemented:
 - Typed configuration via environment / `.env`
 - Async clients: health, update, protocols/runs, camera, offsets, maintenance, etc.
 - CLI: `inspect`, `probe`, `releases`, `put`/`install`, `run-state`, `crs-off-b|c`, `api-suite`,
+  `crs` (enable/trust-ca/lockdown/matrix/probe/suite/settings/users-api), `audit`,
   `serial` (FTDI console)
 - Known-state + seed history: `reset-data`, `known-state`, `seed-runs` (motion; gated)
+- LPC jog latency: `lpc-jog-timing --confirm-clear-deck` (high-Z safe box; gated)
 - SQLite persistence + Alembic migrations; evidence under `ARTIFACT_DIRECTORY`
 - Unit and mocked integration tests
 - Local reference clones under `upstream/` (gitignored): `opentrons`, `robot-stack`
@@ -32,9 +34,9 @@ Implemented:
 
 Not implemented yet:
 
-- Enabling access control (intentionally blocked; one-way on robot)
-- CRS-on authorization matrix / user provisioning
 - Full catalog mutation coverage beyond Tier C sample
+- Logout/revoke API (no auth-server route in the catalog)
+- Dedicated assertion that CRS blocks DELETE of protocol run records
 - Autonomous agent runtime / local web UI
 - OEM / factory mode (ignored by design)
 
@@ -78,7 +80,7 @@ See [.env.example](.env.example). Important keys:
 |----------|---------|
 | `ROBOT_HOST` | Preferred Flex IP or hostname |
 | `ROBOT_HOST_CANDIDATES` | Comma-separated fallbacks (default `192.168.0.21,192.168.0.20`) |
-| `ROBOT_NAME` | Display name (default `Kansas`) |
+| `ROBOT_NAME` | Display name (default `KansasFLEX`) |
 | `OPENTRONS_REPO_PATH` | Local Opentrons monorepo path |
 | `ROBOT_STACK_REPO_PATH` | Local robot-stack clone (release docs) |
 | `ALLOW_MUTATIONS` | Must stay `false` unless you intentionally allow mutations |
@@ -117,8 +119,29 @@ uv run flex-test probe
 # Full A+B+C with timing (mutations + fixtures; see docs/crs-testing.md)
 ALLOW_MUTATIONS=true uv run flex-test api-suite
 
-# Seed succeeded/paused/failed/LPC history for Tier B path params (motion)
+# Seed succeeded/paused/failed/LPC history for Tier B (physical motion)
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
+
+# LPC-like random jogs in a high-Z safe box (C2 empty; latency JSON)
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
+```
+
+## CRS-on API suite
+
+Requires access control enabled, HTTPS CA trust, and fixture users. See
+[docs/crs-on-setup.md](docs/crs-on-setup.md) and [docs/crs-testing.md](docs/crs-testing.md).
+
+```bash
+ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
+ALLOW_MUTATIONS=true uv run flex-test crs trust-ca --password 'word-word-word'
+# Then set ROBOT_USE_HTTPS=true in .env
+
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --show-failures
+ROBOT_USE_HTTPS=true uv run flex-test crs auth-matrix
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --include-lockdown
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+uv run flex-test audit list
 ```
 
 ## Listing published Flex releases
@@ -194,7 +217,9 @@ These tests are read-only. No test mutates a physical robot unless explicitly se
 ## Safety warnings
 
 - This harness talks to a **real robot**.
-- Access control (`PATCH /auth/settings/accessControlEnabled`) is **one-way**. This harness never enables it.
+- Access control (`PATCH /auth/settings/accessControlEnabled`) is **one-way**.
+  Enable only via `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`.
+  Catalog probes never call that PATCH.
 - Mutations are disabled by default (`ALLOW_MUTATIONS=false`).
 - First-class physical motion capabilities are out of scope; live protocol play only with explicit operator request and deck preflight.
 - Prefer dry-run and read-only inspect while developing.
@@ -204,16 +229,17 @@ See [docs/safety-model.md](docs/safety-model.md). For internal Pyro / protocol-s
 
 ## Current limitations
 
-- HTTP by default; HTTPS CA bootstrap deferred
-- Access-control dual-mode is prepared (optional bearer token), but inspect assumes AC off for unauthenticated reads
-- Lockdown smoke scenario YAML exists as a documented placeholder only
+- HTTP by default; HTTPS after `flex-test crs trust-ca` (`ROBOT_USE_HTTPS=true`)
+- Access-control dual-mode is implemented (optional bearer token + CRS-on suites)
+- Lockdown smoke scenario YAML is a historical placeholder; use `flex-test crs lockdown`
 - Agent session / tool / token tables exist but are unused
 
 ## Roadmap
 
 See [docs/development-plan.md](docs/development-plan.md).
 
-Next focus: dual-mode auth session hardening and scenario-runner polish, still without enabling access control.
+Next focus: remaining CRS gaps in [docs/crs-testing.md](docs/crs-testing.md)
+(logout/revoke, DELETE-run-in-CRS, reason-for-interaction API) and scenario-runner polish.
 
 ## Publishing test suggestions (GitHub Pages)
 

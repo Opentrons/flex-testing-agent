@@ -12,7 +12,8 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 
 - [README.md](README.md) — setup, CLI, safety warnings
 - [docs/architecture.md](docs/architecture.md) — layers and extension model
-- [docs/safety-model.md](docs/safety-model.md) — mutation gates, AC one-way rule
+- [docs/crs-testing.md](docs/crs-testing.md) — CRS-off / CRS-on dual-mode SSOT
+- [docs/crs-on-setup.md](docs/crs-on-setup.md) — HTTPS, users, CRS-on CLI
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
 - [docs/pyro-testing.md](docs/pyro-testing.md) — Pyro5 / protocol-subprocess on internal Flex builds
 - [docs/serial-console.md](docs/serial-console.md) — FTDI console setup (humans + agents; Tabby alternative)
@@ -52,10 +53,13 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 | Inspect snapshot | `flex-test inspect` / `capabilities/inspect.py` |
 | Probe / CRS-off A+B+C | `flex-test probe\|crs-off-b\|c\|api-suite` |
 | Seed run history / LPC | `flex-test seed-runs` / `capabilities/seed_runs.py` |
+| LPC jog timing | `flex-test lpc-jog-timing --confirm-clear-deck` / `capabilities/lpc_jog_timing.py` |
 | Camera JPEG | `clients/camera.py` (via probe) |
 | Release catalog | `flex-test releases` / `releases/` |
 | Install robot OS | `flex-test put\|install` / `capabilities/install.py` |
-| AC detect only | `clients/auth_settings.py` (never PATCH-enable) |
+| AC detect / CRS enable | `clients/auth_settings.py`; enable only via `flex-test crs enable --confirm-one-way` |
+| CRS-on suites | `flex-test crs lockdown\|auth-matrix\|probe\|suite\|settings-suite\|users-api` |
+| Audit periods | `flex-test audit list\|download` / `clients/audit.py` |
 | FTDI serial console | `flex-test serial` / `serial_console/` ([docs/serial-console.md](docs/serial-console.md)) |
 | Diagnostic logs archive | `flex-test logs list\|archive` / `clients/logs.py` ([docs/robot-logs.md](docs/robot-logs.md)) |
 
@@ -71,8 +75,8 @@ Published test suggestions (YAML → GitHub Pages on `main`): [docs/test-suggest
 ## Safety (non-negotiable)
 
 - Mutations off unless `ALLOW_MUTATIONS=true`
-- Never enable access control (API is one-way)
-- No first-class physical motion capabilities; live protocol play only if the user explicitly asks (see `docs/pyro-testing.md`)
+- Enable access control only via `flex-test crs enable --confirm-one-way` (API is one-way; catalog probes never PATCH it)
+- Physical motion only via gated `seed-runs` / `lpc-jog-timing --confirm-clear-deck`; live protocol play only if the user explicitly asks (see `docs/pyro-testing.md`)
 - Timeouts on all robot HTTP
 - Do not commit `.env` or secrets
 - Re-check `ROBOT_HOST` (DHCP can move KansasFLEX)
@@ -86,7 +90,12 @@ uv run flex-test inspect
 uv run flex-test probe
 uv run flex-test releases
 ALLOW_MUTATIONS=true uv run flex-test api-suite
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --include-lockdown
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+uv run flex-test audit list
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
 ALLOW_MUTATIONS=true uv run flex-test put <version>
 # Internal / Pyro stack:
 ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external

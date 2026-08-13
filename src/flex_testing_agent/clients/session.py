@@ -4,7 +4,7 @@ Designed for dual-mode access control:
 - When access control is off, omit Authorization (default inspect path).
 - When access control is on, attach an optional bearer token.
 
-Milestone 1 uses HTTP by default. HTTPS + CA bootstrap is deferred.
+HTTP by default. HTTPS after `flex-test crs trust-ca` (`ROBOT_USE_HTTPS=true`).
 """
 
 from __future__ import annotations

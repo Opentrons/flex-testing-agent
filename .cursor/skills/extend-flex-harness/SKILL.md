@@ -49,7 +49,11 @@ is missing, add it here first, then use it.
 | Capability + summary | `capabilities/probe.py`, `capabilities/inspect.py`, `capabilities/robot_status.py` |
 | Post-install health wait | `capabilities/wait_health.py` → `flex-test wait-health` |
 | CRS-on OAuth for CLI | `orchestration/crs_auth.py` (`optional_access_token`) |
+| CRS-on lockdown / matrix | `capabilities/crs_on_lockdown.py`, `capabilities/crs_on_matrix.py` |
+| CRS-on settings / users | `capabilities/crs_auth_settings_suite.py`, `capabilities/user_management_suite.py` |
+| Audit periods | `clients/audit.py` → `flex-test audit` |
 | Mutating install | `capabilities/install.py` + `orchestration/gates.py` |
+| LPC jog timing | `capabilities/lpc_jog_timing.py` + `fixtures/lpc_jog_space.py` |
 | Release catalog | `releases/` |
 
 ## Checklist
@@ -74,6 +78,7 @@ Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
 | Protocol upload / analyze / create-run / sign-off | typed clients → gated capabilities → `flex-test protocol …` |
 | Pyro / nameserver status | read-only capability (+ optional SSH later), not raw shell |
 | Run play / tip smoke | `PHYSICAL_MOTION` risk; only with explicit gates + operator request |
+| LPC jog latency | `flex-test lpc-jog-timing --confirm-clear-deck` (high-Z box; never toward deck) |
 
 `flex-test status` and `flex-test wait-health` already cover instruments/door/subsystems
 and post-install `/health` polling.
@@ -88,5 +93,6 @@ for recovery.
 
 - Architecture: `docs/architecture.md`
 - Safety: `docs/safety-model.md`
+- CRS dual-mode: `docs/crs-testing.md`, `docs/crs-on-setup.md`
 - Versions: `docs/robot-versions.md`
 - Pyro / subprocess testing: `docs/pyro-testing.md`

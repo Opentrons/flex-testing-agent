@@ -1,9 +1,9 @@
 name: lockdown-smoke
 description: >
-  PLACEHOLDER / NOT IMPLEMENTED.
-  Reversible lockdown transitions are unsupported: access control can be
-  enabled via API but cannot be disabled without Opentrons assistance.
-  Milestone 1 only detects accessControlEnabled; it never enables it.
+  Historical placeholder. Live CRS-on negative auth is flex-test crs lockdown
+  (see docs/crs-testing.md and docs/test-suggestions/crs-on-lockdown-negative-auth.yaml).
+  PATCH /auth/settings/accessControlEnabled remains catalog-blocked; enable only
+  via flex-test crs enable --confirm-one-way.
 requires:
   - access_control
 risk_level: DISRUPTIVE

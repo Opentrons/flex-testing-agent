@@ -1,0 +1,80 @@
+id: crs-audit-logs
+title: CRS audit log periods list and download
+summary: >
+  Prove CRS-on audit-server packages are listable and downloadable over HTTP after
+  authenticated mutations, and that CRS-off robots do not expose this stream.
+  Maps PRD audit-trail / log-period requirements and QA checklist §11 at the API
+  layer (hash-chain viewer app is out of scope). File product bugs under RQA-5847.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+    - key: RQA-5843
+      title: "Run commands do not appear in robot log JSON in downloaded log period zip"
+    - key: RQA-5841
+      title: "CRS clarification: requireReasonForInteraction bypass via direct API"
+hardware_required:
+  - flex (compare CRS off vs CRS on)
+  - HTTPS CA trust when CRS on
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test audit list
+    - uv run flex-test audit download <period-id>
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs probe-c
+    - uv run flex-test logs archive
+tests:
+  - id: A0
+    name: CRS-off baseline
+    why: Audit periods exist only when CRS is on.
+    steps:
+      - flex-test inspect shows access control disabled
+      - flex-test audit list → expect empty, 404, or documented CRS-off error (not a silent product zip)
+    result: skipped
+
+  - id: A1
+    name: List periods after CRS-on mutations
+    why: PRD accessibility; periods must be retrievable.
+    steps:
+      - CRS on; ROBOT_USERNAME/PASSWORD or fixture OAuth
+      - ALLOW_MUTATIONS=true uv run flex-test crs probe-c (generates audited mutations)
+      - uv run flex-test audit list → at least one period id
+    result: skipped
+
+  - id: A2
+    name: Download period zip
+    why: PRD export; zip contains user-action log and signing public key.
+    steps:
+      - uv run flex-test audit download <id> (default ARTIFACT_DIRECTORY/audit/<id>.zip)
+      - Confirm zip opens; note whether user-action JSON includes action, accountName, reason
+      - Opentrons-User-Notes from harness mutations should appear as reason when product records it
+    result: skipped
+
+  - id: A3
+    name: Unauthenticated audit mutations denied
+    why: Audit-server is a lockdown strict service.
+    steps:
+      - uv run flex-test crs lockdown --strict-only --show-failures
+      - PATCH/DELETE /audit/external/settings without credentials → 401/403
+    result: skipped
+
+  - id: A4
+    name: requireReasonForInteraction vs API
+    why: PRD why-field; known API bypass RQA-5841.
+    steps:
+      - Do not treat App/ODD reason prompt as API enforcement
+      - Record whether mutating HTTP without Opentrons-User-Notes still succeeds
+      - Comment evidence on RQA-5841 rather than filing a duplicate
+    result: skipped
+
+notes: >
+  Harness: clients/audit.py, flex-test audit list|download. Diagnostic logs remain
+  flex-test logs archive (docs/robot-logs.md). Hash-chain verification in the
+  white-label Log File Viewer is a separate product; this plan only checks robot
+  HTTP list/download. Delete-period (token from export) is DISRUPTIVE and not
+  automated here.

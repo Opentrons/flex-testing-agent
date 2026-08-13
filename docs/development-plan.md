@@ -25,9 +25,9 @@ Small, reviewable pull requests. Each PR should be independently understandable.
 7. **Flex release catalog (robot-stack)**  
    `flex-test releases`, internal/external latest lanes, version docs.
 
-8. **CRS / access-control dual-mode hardening**  
-   Optional token attachment, clearer CRS-on failure modes, still **no enable**.
-   See [crs-testing.md](crs-testing.md).
+8. **CRS / access-control dual-mode**  
+   Optional token attachment, CRS-on suites, gated enable
+   (`flex-test crs enable --confirm-one-way`). See [crs-testing.md](crs-testing.md).
 
 9. **Full HTTP endpoint catalog + CRS-off Tier A**  
    Monorepo-derived `catalog/endpoints.py` (~all methods/paths); CRS-off GET probe
@@ -47,18 +47,20 @@ Small, reviewable pull requests. Each PR should be independently understandable.
     Done: clear robot-server data, Kansas deck, seed inventory (incl. pause/
     failed/`group_steps` annotations, scripted LPC), install/boot timings.
     Design: [known-state-and-latency.md](known-state-and-latency.md).
+    LPC jog latency: `flex-test lpc-jog-timing --confirm-clear-deck`.
 
 11. **CRS-off mutating suite expansion**  
     Tier C sample done (`flex-test crs-off-c`, 7 reversible steps). Expand over
     remaining reversible catalog; Tier D still mostly install/explicit.
 
-12. **User / OAuth clients (CRS-on prep)**  
-    Document and implement `/auth/users`, `POST /oauth2/token`, scopes from
+12. **User / OAuth clients (CRS-on)**  
+    Done: `/auth/users`, `POST /auth/oauth2/token`, scopes from
     `server_utils.auth.scopes`.
 
-13. **CRS-on authorization matrix (deferred)**  
-    Deterministic permission probes with CRS on, after restore path
-    ([EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176)).
+13. **CRS-on authorization matrix**  
+    Done: `flex-test crs lockdown|auth-matrix|probe|suite` after restore path
+    ([EXEC-2176](https://opentrons.atlassian.net/browse/EXEC-2176) /
+    `opentrons_disable_crs`). Remaining gaps listed in [crs-testing.md](crs-testing.md).
 
 14. **Build install capability**  
     Select a published robot OS build and install/verify on Kansas (uses release catalog).
@@ -75,6 +77,8 @@ Small, reviewable pull requests. Each PR should be independently understandable.
 
 ## Milestone 1 status
 
-Items 1–7 and install/release tooling are in place. Item 9 (endpoint catalog +
-CRS-off GET Tier A) is the current CRS focus. Item 8/10–13 remain; do not enable
-CRS from the harness.
+Items 1–7 and install/release tooling are in place. CRS-off A+B+C and CRS-on
+lockdown/matrix/A/B/C/settings/users/audit are in place. Remaining: Tier C/D
+expansion, logout/revoke (no catalog route), and the gaps in
+[crs-testing.md](crs-testing.md). Enable CRS only via
+`flex-test crs enable --confirm-one-way`.

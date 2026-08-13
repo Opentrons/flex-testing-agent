@@ -734,17 +734,27 @@ _ADMIN_USER_OPTION = typer.Option(
     "--as-admin",
     help="Bootstrap admin username for user-management CRUD setup.",
 )
+_OPERATOR_USER_OPTION = typer.Option(
+    "flex_test_operator",
+    "--as-operator",
+    help="Operator fixture username for non-admin 403 checks.",
+)
 
 
 @crs_app.command("users-api")
 def users_api_cmd(
     as_admin: str = _ADMIN_USER_OPTION,
+    as_operator: str = _OPERATOR_USER_OPTION,
 ) -> None:
     """Run auth-server user-management CRUD only (subset of Tier A)."""
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        result = await run_user_management_suite(settings, admin_username=as_admin)
+        result = await run_user_management_suite(
+            settings,
+            admin_username=as_admin,
+            operator_username=as_operator,
+        )
         table = Table(title=f"CRS user-management API ({as_admin})")
         table.add_column("Step")
         table.add_column("Method")

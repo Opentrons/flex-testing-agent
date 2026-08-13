@@ -29,3 +29,9 @@ See [SCHEMA.md](SCHEMA.md). Validated examples:
 - `4.0.0-alpha.10-pyro-subprocess.yaml` (historical internal-line results)
 - `crs-auth-settings-behavior.yaml` (CRS auth settings per-field + combination
   matrix; maps [QA Test Checklist §8](https://opentrons.atlassian.net/wiki/spaces/~712020ac583a1878a5430aaf1db6793f399ca1/pages/6195970453))
+- `crs-off-api-suite.yaml` (CRS-off unauthenticated A+B+C)
+- `crs-on-api-suite.yaml` (CRS-on lockdown + matrix + A+B+C)
+- `crs-on-lockdown-negative-auth.yaml` (negative actors / mutation deny)
+- `crs-user-management-onboarding.yaml` (QA checklist §3/§6/§7 API)
+- `crs-audit-logs.yaml` (audit period list/download)
+- `lpc-jog-timing.yaml` (LPC-like random jogs in a high-Z safe box; latency)

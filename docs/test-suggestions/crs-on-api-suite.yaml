@@ -1,0 +1,100 @@
+id: crs-on-api-suite
+title: CRS-on HTTP API suite (lockdown + matrix + A+B+C)
+summary: >
+  Prove Flex HTTP APIs behave as expected when access control is on: mutations
+  require a scoped bearer token, GETs remain reachable, role fixtures can exercise
+  the same catalog as CRS-off, and negative actors are denied. Complements
+  crs-off-api-suite.yaml. File product bugs under RQA-5847.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+    - key: RQA-5850
+      title: "Audit external GET routes return 200 without auth when access control enabled"
+    - key: RQA-5852
+      title: "Robot-server read endpoints return 200 without auth when access control enabled"
+hardware_required:
+  - flex (CRS-enabled lab robot or dedicated lockout target)
+  - HTTPS CA trust (ROBOT_USE_HTTPS=true)
+harness:
+  commands:
+    - ROBOT_USE_HTTPS=true uv run flex-test inspect
+    - ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --show-failures
+    - ROBOT_USE_HTTPS=true uv run flex-test crs auth-matrix
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs probe
+    - ROBOT_USE_HTTPS=true uv run flex-test crs probe-b --as-user flex_test_operator
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs probe-c
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --include-lockdown
+tests:
+  - id: C0
+    name: Preconditions
+    why: CRS-on suites require accessControlEnabled, CA trust, and fixture users.
+    steps:
+      - flex-test inspect shows access control enabled
+      - ROBOT_USE_HTTPS=true after flex-test crs trust-ca
+      - flex-test crs provision-users if fixture users missing
+    result: skipped
+
+  - id: C1
+    name: Negative auth lockdown
+    why: PRD limited access; unauthenticated and bad-credential mutations must fail.
+    steps:
+      - uv run flex-test crs lockdown --show-failures
+      - GET without credentials → 200/404 (reads not gated; see RQA-5850 / RQA-5852)
+      - POST/PATCH/PUT/DELETE without credentials → 401/403
+      - Fail on mutations returning 200/201/204 without valid credentials
+    result: skipped
+
+  - id: C2
+    name: Scoped GET authorization matrix
+    why: Admin / user / auditor / service tokens vs required_scopes on catalog GETs.
+    steps:
+      - uv run flex-test crs auth-matrix
+      - Auth-server routes asserted strictly; robot-server scoped GETs may be report-only
+    result: skipped
+
+  - id: C3
+    name: Tier A authenticated GETs + user-management API
+    why: Same parameter-free GET catalog as CRS-off, plus auth-server CRUD.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs probe
+      - "Optional GET-only: --skip-users-api"
+    result: skipped
+
+  - id: C4
+    name: Tier B parameterized GETs with OAuth
+    why: Dual-mode; same fixtures as crs-off-b, bearer attached.
+    steps:
+      - uv run flex-test crs probe-b --as-user flex_test_operator
+      - Optional --create-fixtures (needs ALLOW_MUTATIONS)
+    result: skipped
+
+  - id: C5
+    name: Tier C reversible mutations with OAuth
+    why: Mutations succeed with scoped token and Opentrons-User-Notes audit header.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs probe-c
+      - Default --as-user flex_test_service (run_data.write)
+    result: skipped
+
+  - id: C6
+    name: Combined CRS-on suite
+    why: Single timing JSON pass (optional lockdown preflight + matrix + A+B+C).
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs suite --include-lockdown
+      - Review artifacts/crs_on_suite.json
+      - Archive diagnostic logs; list audit periods (flex-test audit list)
+    result: skipped
+
+notes: >
+  Product contract under test: CRS gates mutations, not GETs. Public routes:
+  GET /health, GET /server/update/health, GET /auth/settings/accessControlEnabled,
+  POST /auth/oauth2/token. Setup: docs/crs-on-setup.md. Negative-auth detail:
+  crs-on-lockdown-negative-auth.yaml. Settings tunables: crs-auth-settings-behavior.yaml.
+  User CRUD / password reset: crs-user-management-onboarding.yaml. Audit packages:
+  crs-audit-logs.yaml.

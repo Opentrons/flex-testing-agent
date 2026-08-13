@@ -1,0 +1,73 @@
+id: crs-off-api-suite
+title: CRS-off HTTP API suite (unauthenticated A+B+C)
+summary: >
+  Prove Flex HTTP APIs behave as expected when access control is off: parameter-free
+  GETs succeed, parameterized GETs resolve against fixtures, and reversible mutations
+  work without a bearer token. Pair with crs-on-api-suite.yaml for the dual-mode
+  contract. File product bugs under RQA-5847.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+hardware_required:
+  - flex (CRS off; KansasFLEX lab default)
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test run-state
+    - uv run flex-test probe
+    - ALLOW_MUTATIONS=true uv run flex-test crs-off-b --create-fixtures
+    - ALLOW_MUTATIONS=true uv run flex-test crs-off-c
+    - ALLOW_MUTATIONS=true uv run flex-test api-suite
+tests:
+  - id: O0
+    name: Preconditions
+    why: CRS-off suites refuse to run when accessControlEnabled is true.
+    steps:
+      - flex-test inspect shows access control disabled
+      - flex-test run-state shows no-current (or ensure before A/C)
+    result: skipped
+
+  - id: O1
+    name: Tier A parameter-free GETs
+    why: PRD dual-mode; unauthenticated reads must work when CRS is off.
+    steps:
+      - uv run flex-test probe
+      - Expect catalog parameter-free GETs 200 (or documented soft 403/404/410)
+      - No Authorization header on requests
+    result: skipped
+
+  - id: O2
+    name: Tier B parameterized GETs
+    why: Path-param routes need fixtures; still unauthenticated when CRS is off.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs-off-b --create-fixtures
+      - Default run presence current-idle
+      - Failed parameterized GETs should be zero (skipped unresolved paths OK)
+    result: skipped
+
+  - id: O3
+    name: Tier C reversible mutations without auth
+    why: CRS-off must allow lights, clientData, camera, offsets, throwaway run delete.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs-off-c
+      - Expect mutations 200/201/204 without a bearer token
+    result: skipped
+
+  - id: O4
+    name: Combined A+B+C
+    why: Single timing JSON pass for CRS-off regression.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test api-suite
+      - Archive diagnostic logs after the pass (flex-test logs archive)
+    result: skipped
+
+notes: >
+  Design SSOT: docs/crs-testing.md. CRS-on counterpart: crs-on-api-suite.yaml.
+  Do not enable CRS from this plan. Tier D/E (install, physical motion) stay
+  explicit operator requests, not this suite.

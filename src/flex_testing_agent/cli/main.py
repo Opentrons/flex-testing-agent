@@ -1094,6 +1094,137 @@ def seed_runs_command(
     raise SystemExit(asyncio.run(_run()))
 
 
+@app.command("lpc-jog-timing")
+def lpc_jog_timing_command(
+    confirm_clear_deck: bool = typer.Option(
+        False,
+        "--confirm-clear-deck",
+        help="Required. Slot C2 must be empty (virtual tiprack only).",
+    ),
+    jogs: int = typer.Option(
+        80,
+        "--jogs",
+        min=1,
+        max=400,
+        help="Number of in-box random moveRelative jogs (default 80).",
+    ),
+    rng_seed: int = typer.Option(
+        42,
+        "--rng-seed",
+        help="RNG seed for a reproducible jog path.",
+    ),
+    save_every: int = typer.Option(
+        10,
+        "--save-every",
+        help="savePosition every N jogs (0 disables). LPC-like confirm timing.",
+    ),
+    slot: str = typer.Option("C2", "--slot", help="Empty slot for virtual tiprack."),
+    pipette_mount: str = typer.Option(
+        "right",
+        "--pipette-mount",
+        help="Mount with a pipette (KansasFLEX default: right P50 single).",
+    ),
+    approach_z: float = typer.Option(
+        40.0,
+        "--approach-z",
+        help="mm above well A1 top at start (min 20; never jog below this).",
+    ),
+) -> None:
+    """LPC-like random jogs in a high-Z safe box; record per-jog latency.
+
+    PHYSICAL_MOTION. Requires ALLOW_MUTATIONS=true and --confirm-clear-deck.
+    Jogs stay over virtual tiprack A1 on C2 and never move closer to the deck
+    than the approach height. See docs/known-state-and-latency.md.
+    """
+    clear_settings_cache()
+    settings = get_settings()
+    configure_logging(settings.log_level)
+
+    async def _run() -> int:
+        from flex_testing_agent.capabilities.lpc_jog_timing import run_lpc_jog_timing
+        from flex_testing_agent.orchestration.crs_auth import optional_access_token
+        from flex_testing_agent.orchestration.lock import RobotOperationLock
+        from flex_testing_agent.robots.flex import FlexRobot
+
+        if not confirm_clear_deck:
+            console.print(
+                "[red]Refusing LPC jog timing without --confirm-clear-deck. "
+                "C2 must be empty; trash A3 and heater-shaker D1 may remain.[/red]"
+            )
+            return 1
+
+        try:
+            resolved = await _resolve_settings_for_robot(settings)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        host = resolved.require_robot_host()
+        artifact_root = resolved.ensure_artifact_directory()
+        try:
+            token = await optional_access_token(resolved, require_when_enabled=True)
+            with RobotOperationLock(host, artifact_root / "locks"):
+                async with FlexRobot(resolved, access_token=token) as robot:
+                    result = await run_lpc_jog_timing(
+                        robot,
+                        confirm_clear_deck=True,
+                        jog_count=jogs,
+                        rng_seed=rng_seed,
+                        save_every=save_every,
+                        slot=slot,
+                        pipette_mount=pipette_mount,
+                        approach_z_mm=approach_z,
+                    )
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
+
+        table = Table(title="LPC jog timing", show_header=False)
+        table.add_row("OK", "yes" if result.ok else "no")
+        table.add_row("Slot", result.slot)
+        table.add_row("Approach Z (mm)", str(result.approach_z_mm))
+        if result.plan is not None:
+            table.add_row("Jogs planned", str(result.plan.jog_count))
+            table.add_row("Rejected candidates", str(result.plan.rejected_candidates))
+            table.add_row("RNG seed", str(result.plan.rng_seed))
+        if result.jog_stats is not None:
+            stats = result.jog_stats
+            table.add_row(
+                "moveRelative",
+                (
+                    f"n={stats.count} mean={stats.mean_seconds:.3f}s "
+                    f"p50={stats.p50_seconds:.3f}s p95={stats.p95_seconds:.3f}s "
+                    f"max={stats.max_seconds:.3f}s"
+                ),
+            )
+        if result.save_stats is not None and result.save_stats.count:
+            stats = result.save_stats
+            table.add_row(
+                "savePosition",
+                (
+                    f"n={stats.count} mean={stats.mean_seconds:.3f}s "
+                    f"p95={stats.p95_seconds:.3f}s"
+                ),
+            )
+        for axis_stats in result.stats_by_axis:
+            if axis_stats.count == 0:
+                continue
+            table.add_row(
+                axis_stats.name,
+                (
+                    f"n={axis_stats.count} mean={axis_stats.mean_seconds:.3f}s "
+                    f"p95={axis_stats.p95_seconds:.3f}s"
+                ),
+            )
+        table.add_row("Timing", result.timing_path or "n/a")
+        if result.detail:
+            table.add_row("Detail", result.detail[:120])
+        console.print(table)
+        return 0 if result.ok else 1
+
+    raise SystemExit(asyncio.run(_run()))
+
+
 @app.command("reset-data")
 def reset_data_command(
     deck_configuration: bool = typer.Option(

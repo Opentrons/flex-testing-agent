@@ -3,7 +3,8 @@
 Milestone 1 detects access control state via GET. Enabling access control via
 ``PATCH /auth/settings/accessControlEnabled`` is exposed only as
 ``flex-test crs enable --confirm-one-way`` because the API accepts only
-``true`` and cannot disable it without Opentrons assistance or an SSH data wipe.
+``true``. Disable is root-shell ``opentrons_disable_crs`` or EXEC-2176 wipe,
+not the public HTTP API.
 """
 
 from __future__ import annotations

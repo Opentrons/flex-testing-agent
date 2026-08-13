@@ -15,28 +15,41 @@ Primary product docs:
 
 This harness treats CRS as a **dual-mode** problem:
 
-1. **CRS off** (default for KansasFLEX lab work): unauthenticated HTTP works; build a
-   complete endpoint exercise suite here first.
-2. **CRS on** (later): same catalog, plus OAuth login, roles/scopes, and expected
-   401/403 matrix. Enablement stays **blocked** in the harness until a restore path
-   is documented and rehearsed.
+1. **CRS off** (default for KansasFLEX lab work): unauthenticated HTTP works; run
+   `flex-test probe|crs-off-b|crs-off-c|api-suite`.
+2. **CRS on**: same catalog, plus OAuth, roles/scopes, 401/403 matrix, settings,
+   user CRUD, and audit download. Enablement is **gated** (not casual): only
+   `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`. Catalog
+   probes never call `PATCH /auth/settings/accessControlEnabled`.
 
 ## Goal
 
 When CRS is off, the client catalog and suite can exercise **every** Flex HTTP
 endpoint the monorepo exposes (robot-server, auth-server, update-server,
-system-server, audit-server), with risk gates. When CRS is on later, the same
-catalog drives an authorization matrix without inventing ad-hoc URLs.
+system-server, audit-server), with risk gates. When CRS is on, the same catalog
+drives an authorization matrix without inventing ad-hoc URLs.
+
+**Product contract under test (API):** CRS gates **mutations**
+(POST/PATCH/PUT/DELETE). **GET** routes stay reachable with or without a token
+(except auth-server user lookups that need `users.read*`). That matches current
+robot-server / audit-server behavior on 10.0.0-alpha.1 ([RQA-5852](https://opentrons.atlassian.net/browse/RQA-5852),
+[RQA-5850](https://opentrons.atlassian.net/browse/RQA-5850)). The PRD phrase
+"login required for any action" is interpreted here as **mutating actions**, not
+reads. If product later gates GETs, update lockdown/auth-matrix expectations.
 
 ## Architecture
 
 ```text
-docs/crs-testing.md          design SSOT
+docs/crs-testing.md          design SSOT (this file)
+docs/crs-on-setup.md         CRS-on bootstrap (HTTPS, users, CLI)
 catalog/endpoints.py         method × path inventory + risk + scopes
 clients/*                    typed HTTP wrappers (reuse RobotHttpSession)
 capabilities/probe.py        CRS-off Tier A (parameter-free GETs)
 capabilities/crs_off.py      CRS-off Tier B / Tier C
-flex-test probe|crs-off-b|crs-off-c|inspect
+capabilities/crs_on_*.py     CRS-on lockdown, matrix, probe A/B/C, suite
+flex-test probe|crs-off-b|crs-off-c|api-suite
+flex-test crs …              CRS-on setup and suites
+flex-test audit list|download
 ```
 
 ### Endpoint catalog
@@ -50,7 +63,7 @@ flex-test probe|crs-off-b|crs-off-c|inspect
 | `risk_level` | Gate for live calls |
 | `required_scopes` | CRS-on expectations (from `require_scopes`) |
 | `parameterized` | Needs fixture IDs before live call |
-| `blocked` | Never call (`PATCH .../accessControlEnabled`) |
+| `blocked` | Catalog probes never call (`PATCH .../accessControlEnabled`); enable only via `flex-test crs enable --confirm-one-way` |
 | `crs_off_acceptable_status` | Soft failures when probing CRS-off |
 
 Regenerate from a local monorepo clone:
@@ -69,15 +82,15 @@ Prefer domain clients over a single mega-client:
 | Domain | Client | Notes |
 |--------|--------|-------|
 | Health / update health | exists | |
-| Auth settings detect | exists | GET only; never enable |
+| Auth settings | exists | GET detect + GET/PATCH/DELETE `/auth/settings`; enable only via gated CLI |
 | Camera | exists | |
 | Modules | exists | |
 | Readonly / probe | exists | Driven by catalog GETs |
 | Protocols / runs / data files | exists | Tier B fixtures + upload |
 | Client data / robot lights | exists | Tier C reversible mutations |
-| OAuth token | next (CRS-on) | `POST /oauth2/token` |
-| Users | next (CRS-on) | `/auth/users/*` |
-| Audit | next | `/audit/*` |
+| OAuth token | exists | `POST /auth/oauth2/token` + introspect (`clients/oauth.py`) |
+| Users | exists | `/auth/users/*` (`clients/users.py`) |
+| Audit | exists | `GET /audit/external/logPeriods[/{id}/download]` (`flex-test audit`) |
 
 ## Run state matrix (required preflight)
 
@@ -127,7 +140,7 @@ suite preflight.
 | **A+B+C** | Full CRS-off API pass with timing JSON | `ALLOW_MUTATIONS`; `flex-test api-suite` | A/C `no-current`, B `current-idle` |
 | **D** | Disruptive / install / destructive | Explicit capability + mutations | declare per capability |
 | **E** | Physical motion (home, move, run play) | Explicit operator request only | declare per scenario |
-| **Blocked** | `PATCH /auth/settings/accessControlEnabled` | Always refused | n/a |
+| **Blocked in catalog probes** | `PATCH /auth/settings/accessControlEnabled` | Enable only via `flex-test crs enable --confirm-one-way` | n/a |
 
 Tier B uses existing robot resources when present (after `seed-runs`, history
 usually supplies commands + annotations). Pass `--create-fixtures` to upload
@@ -158,10 +171,11 @@ Live CRS-off A+B+C on KansasFLEX (`v9.1.2-alpha.6`): Tier A 51/0, Tier B 35/0
 
 ## Enter / exit CRS (operator notes)
 
-The harness still **never** enables CRS via
-`PATCH /auth/settings/accessControlEnabled`. When an operator manually enters
-CRS on a lab robot (ODD / product flow), use the notes below. Confirm behavior
-on the build under test; product may still evolve.
+The catalog still **never** probes
+`PATCH /auth/settings/accessControlEnabled`. Operators enable CRS only via
+`ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way` (or the
+ODD / App product flow). Confirm behavior on the build under test; product may
+still evolve.
 
 ### Service password (enter and disable CRS)
 
@@ -219,10 +233,10 @@ the fallback when the binary is missing, the password path fails, or product
 docs still require wipe.
 
 Harness policy: do not wrap `opentrons_disable_crs` as a first-class mutation
-capability until CRS-on testing is an explicit operator request with lockout
-acceptance. Prefer documenting the manual path here.
+capability. Document the manual path here. Enable stays gated behind
+`--confirm-one-way`.
 
-## CRS-on suite (deferred)
+## CRS-on suite (implemented)
 
 Prerequisites:
 
@@ -233,22 +247,71 @@ Prerequisites:
 2. Documented **remote-access carveout** (below) so QA can still use SSH /
    Jupyter / devtools while CRS stays on.
 3. Dedicated robot or accepted lockout risk (not casually KansasFLEX).
-4. OAuth client + role fixtures (Admin / User / Auditor / Service), including
-   **manually created** `testadmin` / `testuser` (or equivalent) after enter CRS.
+4. OAuth client + role fixtures (Admin / User / Auditor / Service) via
+   `flex-test crs provision-users` (or manually created `testadmin` / `testuser`).
 
-Then for each catalog entry:
+Catalog expectations when CRS is on:
 
 - unauthenticated **GET** → expect success (CRS does not gate reads)
 - unauthenticated **POST/PATCH/PUT/DELETE** → expect 401/403 (except public routes)
 - token without required scope on **mutations** → 403
 - token with required scope on mutations → success (or resource-specific 404)
 
-**Harness:** `flex-test crs lockdown` (negative auth, bad credentials; excludes
-DISRUPTIVE+ routes so probes never reboot or reconfigure the robot) plus
-`flex-test crs auth-matrix` (scoped GET allow/deny with valid role tokens). See [crs-on-setup.md](crs-on-setup.md) and
-`docs/test-suggestions/crs-on-lockdown-negative-auth.yaml`.
+Public routes: `GET /health`, `GET /server/update/health`,
+`GET /auth/settings/accessControlEnabled`, `POST /auth/oauth2/token`.
 
-Still never implement a harness “enable CRS” happy path without restore.
+| Command | What it proves |
+|---------|----------------|
+| `flex-test crs lockdown` | Negative auth (no/bad/under-scoped credentials); DISRUPTIVE+ excluded |
+| `flex-test crs auth-matrix` | Scoped GET allow/deny with valid role tokens |
+| `flex-test crs probe` | Tier A authenticated GETs + user-management API |
+| `flex-test crs probe-b` | Parameterized GETs with OAuth |
+| `flex-test crs probe-c` | Reversible mutations with OAuth + `Opentrons-User-Notes` |
+| `flex-test crs suite [--include-lockdown]` | Combined matrix + A+B+C (optional L1 lockdown) |
+| `flex-test crs users-api` | Auth-server CRUD, role change, non-admin 403, password reset |
+| `flex-test crs settings-suite` | QA checklist §8 tunables (S0–S12) |
+| `flex-test audit list\|download` | Audit log periods |
+
+Bootstrap: [crs-on-setup.md](crs-on-setup.md). Published plans:
+[crs-on-api-suite.yaml](test-suggestions/crs-on-api-suite.yaml),
+[crs-on-lockdown-negative-auth.yaml](test-suggestions/crs-on-lockdown-negative-auth.yaml).
+
+Enable only via `flex-test crs enable --confirm-one-way` after restore is rehearsed.
+
+## PRD / QA checklist coverage (API)
+
+Product SSOT: [Approved PRD - CRS V2](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5339512880).
+QA checklist: [QA Test Checklist for RCS](https://opentrons.atlassian.net/wiki/spaces/~712020ac583a1878a5430aaf1db6793f399ca1/pages/6195970453).
+This table is **HTTP / serial harness** coverage only. ODD and Desktop App UI
+stay on Sara's checklist.
+
+| QA / PRD | Harness proof | Status |
+|----------|---------------|--------|
+| Dual-mode: CRS off unauthenticated HTTP | `flex-test api-suite` / [crs-off-api-suite.yaml](test-suggestions/crs-off-api-suite.yaml) | Covered |
+| Dual-mode: CRS on mutations gated, GETs open | `crs lockdown` + `crs auth-matrix` + `crs suite` / [crs-on-api-suite.yaml](test-suggestions/crs-on-api-suite.yaml) | Covered |
+| §1 Activation | `flex-test crs enable --confirm-one-way` (gated) | Covered (one-way) |
+| §1 Deactivation restores unauthenticated HTTP | Manual `opentrons_disable_crs`; then `flex-test api-suite` | Operator; not a capability |
+| §2 Robot Encryption Key / HTTPS CA | `flex-test crs trust-ca` | Partial (rotation UX is ODD) |
+| §3 Login success / fail | ROPC in OAuth client; `lockdown --actors bad_oauth`; [crs-user-management-onboarding.yaml](test-suggestions/crs-user-management-onboarding.yaml) U7 | API covered; modal is App/ODD |
+| §4 Logout / revoke token | No `/auth/oauth2/logout` in catalog | Gap (App/ODD + idleLogout S6) |
+| §5 Inactivity timeout | `crs settings-suite` S6 (`--include-slow`) | Covered (slow) |
+| §6 User CRUD, role, rename, reset, delete | `flex-test crs users-api` | Covered |
+| §6 Non-admin 403 on user mutations | `users-api` operator_patch/delete_forbidden | Covered |
+| §6 Duplicate username | `users-api` post_duplicate_username_rejected | Covered |
+| §6 Deactivate / reactivate | `settings-suite` S1 (lock via failed logins; PATCH `locked=false`) | Covered via S1 |
+| §7 Temp password one-use / original rejected | `users-api` original_password_rejected + temp_password_rejected | Covered |
+| §7 First-login prompt without password | App/ODD | Out of scope |
+| §8 Settings tunables | `crs settings-suite` S0–S12 / [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml) | Covered (S5 often blocked) |
+| §8 requireReasonForInteraction | Audit settings; [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841) | Known API bypass; not asserted as pass |
+| §9 HTTPS for credentials | `ROBOT_USE_HTTPS=true` after `trust-ca` | Partial (App/ODD token storage out of scope) |
+| §10 Frontend UI state | App/ODD | Out of scope |
+| §11 Audit logs | `flex-test audit list\|download` / [crs-audit-logs.yaml](test-suggestions/crs-audit-logs.yaml) | List/download covered; hash-chain viewer is product |
+| §12 Test DB migration | Release engineering | Out of scope |
+| PRD: SSH/Jupyter off when CRS on | `flex-test serial remote-access-status` | Covered (status); carveout is lab-only |
+| PRD: delete protocol run record removed in CRS | Not a dedicated suite step | Gap (spot-check DELETE `/runs/{id}` vs product) |
+| PRD: Quick Transfer disabled | App/ODD | Out of scope |
+| PRD: protocol sign-off | `settings-suite` S9 | Covered (HTTP PATCH signedBy) |
+| PRD: requireAdminCreds for update / send protocol | `settings-suite` S7 / S8 / S10 | Covered |
 
 ## CRS-on remote-access carveout (QA)
 
@@ -319,7 +382,7 @@ ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 Unchanged from [safety-model.md](safety-model.md):
 
 - Mutations default off
-- Never enable CRS via API from this harness
+- Enable CRS only via `flex-test crs enable --confirm-one-way` (catalog probes never PATCH it)
 - No first-class physical-motion CLI; live play only on explicit request
 - Timeouts on all HTTP; redact secrets in evidence
 - Re-check `ROBOT_HOST` (DHCP)
@@ -327,31 +390,29 @@ Unchanged from [safety-model.md](safety-model.md):
 ## Workstreams
 
 1. **Catalog + Tier A**: done (`flex-test probe`).
-2. **Domain clients + Tier B/C + api-suite**: done (`protocols` / `runs` /
-   `data_files` / `client_data` / `robot_control` / `camera` /
-   `error_recovery` / `labware_offsets` / `maintenance_runs`;
-   `flex-test crs-off-b|crs-off-c|api-suite`).
-3. **Run-state preflight**: done for Tier A/B/C (`flex-test run-state`,
-   `--run-state` / `--ensure-run-state`). Expand matrix for played / succeeded
-   groups when Tier E scenarios land.
+2. **Domain clients + Tier B/C + api-suite**: done (`flex-test crs-off-b|crs-off-c|api-suite`).
+3. **Run-state preflight**: done for Tier A/B/C (`flex-test run-state`).
 4. **CRS-off Tier C expansion**: more of the ~57 reversible catalog mutations
    beyond the current 7 cleanup steps.
 5. **CRS-off Tier D expansion**: more disruptive catalog coverage beyond install.
-6. **OAuth + users clients**: prepare dual-mode session (no enable).
-7. **CRS-on authorization matrix**: after remote-access carveout + disable path;
-   map to QA checklist sections (login, roles, settings, logs). Bootstrap:
-   [crs-on-setup.md](crs-on-setup.md).
-8. **Auth settings behavior suite**: per-field and combination coverage for
-   `GET/PATCH /auth/settings` (`maxNumberOfLoginAttempts`, password complexity,
-   `idleLogout`, `requireAdminCreds*`). Test plan:
-   [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml)
-   (maps QA checklist §8). Harness: `flex-test crs settings-suite` with
-   snapshot/restore defaults; reuse `crs user-management` ephemeral users for
-   login-attempt cases.
-9. **Published test suggestions**: YAML under `docs/test-suggestions/` for operator runs.
+6. **OAuth + users + enable**: done (`clients/oauth.py`, `clients/users.py`,
+   gated `flex-test crs enable --confirm-one-way`).
+7. **CRS-on authorization matrix + lockdown + A/B/C suite**: done
+   (`flex-test crs lockdown|auth-matrix|probe|probe-b|probe-c|suite`).
+8. **Auth settings behavior suite**: done (`flex-test crs settings-suite`;
+   [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml)).
+9. **User-management / password-reset API**: done (`flex-test crs users-api`;
+   [crs-user-management-onboarding.yaml](test-suggestions/crs-user-management-onboarding.yaml)).
+10. **Audit list/download**: done (`flex-test audit`;
+    [crs-audit-logs.yaml](test-suggestions/crs-audit-logs.yaml)). Hash-chain
+    viewer and delete-period remain product / DISRUPTIVE.
+11. **Remaining gaps**: logout/revoke API (none in catalog); DELETE run-record
+    blocked-in-CRS assertion; requireReasonForInteraction API (RQA-5841);
+    ODD/App UI (QA §3–5, §9–10).
 
 ## Related harness docs
 
+- [crs-on-setup.md](crs-on-setup.md)
 - [architecture.md](architecture.md) (dual-mode AC note)
 - [safety-model.md](safety-model.md)
 - [robot-logs.md](robot-logs.md) (audit vs diagnostic vs protocol run logs)
@@ -359,3 +420,4 @@ Unchanged from [safety-model.md](safety-model.md):
 - [source-research.md](source-research.md)
 - [development-plan.md](development-plan.md)
 - [pyro-testing.md](pyro-testing.md) (orthogonal; robot may be unhealthy while this lands)
+- Published plans: [test-suggestions/](test-suggestions/)

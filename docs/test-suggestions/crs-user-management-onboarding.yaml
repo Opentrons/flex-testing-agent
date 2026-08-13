@@ -1,0 +1,93 @@
+id: crs-user-management-onboarding
+title: CRS user management, password reset, and login API
+summary: >
+  Exercise auth-server user CRUD, role change, non-admin 403, duplicate username,
+  admin password reset, and temporary-password one-use via HTTP. Maps QA checklist
+  sections 3, 6, and 7 (API only; ODD/App UI is out of scope). File product bugs
+  under RQA-5847.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: null
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5847
+      title: "10.0.0-alpha.1 Bugs"
+hardware_required:
+  - flex (CRS-enabled)
+  - HTTPS CA trust (ROBOT_USE_HTTPS=true)
+harness:
+  commands:
+    - ROBOT_USE_HTTPS=true uv run flex-test inspect
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs probe
+    - ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite --cases S1
+tests:
+  - id: U0
+    name: Preconditions
+    why: User CRUD needs CRS on, bootstrap admin, and operator fixture.
+    steps:
+      - GET /auth/settings/accessControlEnabled → true
+      - flex-test crs provision-users if flex_test_operator missing
+    result: skipped
+
+  - id: U1
+    name: Admin user CRUD verbs
+    why: QA checklist §6 create, rename, full name, reset, delete.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs users-api
+      - Expect POST /auth/users, GET byUsername, PATCH profile/rename, POST resetPassword, DELETE
+    result: skipped
+
+  - id: U2
+    name: Change account type
+    why: QA checklist §6 admin can change account type / role.
+    steps:
+      - Covered by users-api step patch_account_type (user → auditor → user)
+    result: skipped
+
+  - id: U3
+    name: Duplicate username rejected
+    why: QA checklist §6 admin cannot update/create to an existing username.
+    steps:
+      - Covered by users-api step post_duplicate_username_rejected (expect 409/422)
+    result: skipped
+
+  - id: U4
+    name: Non-admin user mutations denied
+    why: QA checklist §6 non-admin 403 on PATCH/DELETE users.
+    steps:
+      - Covered by users-api operator_patch_forbidden and operator_delete_forbidden
+    result: skipped
+
+  - id: U5
+    name: Password reset one-use
+    why: QA checklist §7 temp password works once; original password rejected.
+    steps:
+      - Covered by users-api original_password_rejected_after_reset and
+        temp_password_rejected_after_rotation
+    result: skipped
+
+  - id: U6
+    name: Account lock after failed logins
+    why: QA checklist §3 / §6 deactivate after max attempts; admin can reactivate.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test crs settings-suite --cases S1
+      - S1 creates ephemeral user, fails ROPC to threshold, asserts locked, reactivates
+    result: skipped
+
+  - id: U7
+    name: Bad credentials do not mint tokens
+    why: QA checklist §3 incorrect password / username.
+    steps:
+      - uv run flex-test crs lockdown --actors bad_oauth --strict-only
+      - POST /auth/oauth2/token with wrong password must not return access_token
+    result: skipped
+
+notes: >
+  ODD/Desktop login modal, locked overlay, and first-login UX are App/ODD, not this
+  harness. Deactivate is PATCH locked=false only (API cannot lock=true); lock comes
+  from failed logins (S1). Logout/revoke has no auth-server route in the catalog;
+  session end is idleLogout (settings-suite S6) plus App/ODD token drop.
+  Implementation: capabilities/user_management_suite.py, flex-test crs users-api.

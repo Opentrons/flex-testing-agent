@@ -41,7 +41,9 @@ what was reused vs rejected.
 1. HTTPS trust     flex-test crs trust-ca
 2. User fixtures   fixtures/crs_users.yaml + flex-test crs provision-users
 3. Auth clients    oauth + users clients, session bearer token
-4. CRS-on matrix   deferred: authorization probes per catalog + scopes
+4. CRS-on matrix   flex-test crs auth-matrix + crs lockdown
+5. CRS-on A/B/C    flex-test crs probe|probe-b|probe-c|suite
+6. Settings/users/audit  settings-suite, users-api, flex-test audit
 ```
 
 ### 1. HTTPS trust
@@ -110,7 +112,8 @@ When CRS is still off, provisioning works without admin credentials (unauthentic
 ### 3. Auth session
 
 With CRS on, obtain a token via ROPC and attach `Authorization: Bearer …` on
-`RobotHttpSession`. Future CLI flags: `--as-user flex_test_operator`.
+`RobotHttpSession`. CLI suites take `--as-user` (default `flex_test_operator`
+for reads, `flex_test_service` for mutations).
 
 ### 4. CRS-on authorization matrix
 
@@ -215,10 +218,26 @@ ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --skip-auth
 Writes `artifacts/crs_on_suite.json` and a timing report under `artifacts/timing/`.
 Default OAuth user: `flex_test_service` (broad scopes for B fixture create and C).
 Tier A includes user-management API coverage automatically.
+Optional: `--include-lockdown` runs L1 negative auth before the suite.
+
+### 9. Auth settings, users-api, audit
+
+```bash
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+uv run flex-test audit list
+uv run flex-test audit download <period-id>
+```
+
+Plans: [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml),
+[crs-user-management-onboarding.yaml](test-suggestions/crs-user-management-onboarding.yaml),
+[crs-audit-logs.yaml](test-suggestions/crs-audit-logs.yaml),
+[crs-on-api-suite.yaml](test-suggestions/crs-on-api-suite.yaml).
 
 ## Safety
 
-- Harness **never** PATCH-enables CRS.
+- Enable CRS **only** via `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`.
+  Catalog probes never call `PATCH /auth/settings/accessControlEnabled`.
 - `trust-ca` and `provision-users` are `REVERSIBLE_MUTATION` / `DISRUPTIVE` as
   appropriate; require `ALLOW_MUTATIONS=true` when mutating robot auth state.
 - Redact tokens and passwords in evidence (`evidence/redaction.py`).

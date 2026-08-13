@@ -64,11 +64,18 @@ stream.
 **Example questions:** Who ran this protocol and why? What user actions happened
 before a failure in a CRS-on lab?
 
-**Harness notes:** Catalog already lists audit-server routes such as
-`GET /audit/external/logPeriods` and related settings
-([`catalog/endpoints.py`](../src/flex_testing_agent/catalog/endpoints.py)).
-Typed download / verify capabilities are not first-class yet; prefer documented
-product export until then. Never invent ad-hoc URLs.
+**Harness notes:** Typed client `clients/audit.py`; CLI:
+
+```bash
+uv run flex-test audit list
+uv run flex-test audit download <period-id>
+```
+
+Downloads land under `ARTIFACT_DIRECTORY/audit/`. Catalog lists audit-server
+routes in [`catalog/endpoints.py`](../src/flex_testing_agent/catalog/endpoints.py).
+Hash-chain verification in the white-label Log File Viewer is product, not this
+harness. Plan: [crs-audit-logs.yaml](test-suggestions/crs-audit-logs.yaml).
+Never invent ad-hoc URLs.
 
 ## 2. Diagnostic logs
 

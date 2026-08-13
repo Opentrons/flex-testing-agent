@@ -132,7 +132,7 @@ NOTES_OVERRIDES = {
         "Deprecated; bare GET without authenticationBearer header yields 422."
     ),
     ("PATCH", "/auth/settings/accessControlEnabled"): (
-        "ONE-WAY CRS enable. Harness never calls this."
+        "ONE-WAY CRS enable. Probes skip; use crs enable --confirm-one-way."
     ),
     ("GET", "/wifi/list"): "Wi-Fi scan; may be slow.",
     ("GET", "/robot/positions"): "Legacy control path; may 403/500 depending on build.",

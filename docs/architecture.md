@@ -23,7 +23,8 @@ Small async `httpx` wrappers in `src/flex_testing_agent/clients/`:
 - `RobotHttpSession`: shared headers (`Opentrons-Version: 3`), timeouts, optional bearer token
 - `HealthClient`: `GET /health`
 - `UpdateHealthClient`: `GET /server/update/health`
-- `AuthSettingsClient`: `GET /auth/settings/accessControlEnabled` (detect only)
+- `AuthSettingsClient`: GET detect plus GET/PATCH/DELETE `/auth/settings`;
+  enable CRS only via gated `flex-test crs enable --confirm-one-way`
 - `ProtocolsClient` / `RunsClient` / `DataFilesClient`: protocol upload, run create
   (no play), CSV files for CRS-off Tier B fixtures
 - `MaintenanceRunsClient` / `LabwareOffsetsClient`: scripted LPC seed + Tier B
@@ -31,6 +32,7 @@ Small async `httpx` wrappers in `src/flex_testing_agent/clients/`:
 - `ClientDataClient` / `RobotControlClient` / `CameraClient` /
   `ErrorRecoveryClient`: reversible Tier C mutations (lights, clientData,
   camera enable/stream settings, errorRecovery)
+- `OAuthClient` / `UsersClient` / `AuditClient`: CRS-on ROPC, user CRUD, audit periods
 
 Clients are independent of scenarios and agents. They raise explicit timeout/API errors.
 
@@ -55,8 +57,9 @@ Capabilities in `src/flex_testing_agent/capabilities/` compose client calls into
 - Mutation-gate checks
 
 Capabilities include `inspect`, `probe`, `crs_off` Tier B/C, `api_suite`,
-`seed_runs` / `seed_lpc`, install, reset-data, and known-state. Enabling access
-control is explicitly blocked.
+CRS-on lockdown/matrix/probe/suite, `seed_runs` / `seed_lpc`, `lpc_jog_timing`,
+install, reset-data, and known-state. Enabling access control is gated
+(`flex-test crs enable --confirm-one-way`); catalog probes never call that PATCH.
 
 ### 3. Scenarios and orchestration
 
@@ -102,13 +105,13 @@ unauthenticated access. Inspect and `flex-test probe` run without credentials.
 The full HTTP inventory lives in `catalog/endpoints.py` (all methods); Tier A
 CRS-off coverage is parameter-free GETs via `ReadonlyClient`.
 
-When CRS is enabled later, `RobotHttpSession` can attach an optional bearer
-token. This harness does not implement enablement (one-way API). CRS-on matrix
-testing waits on restore: serial **remote-access carveout** for SSH/Jupyter while
-CRS stays on (`flex-test serial allow-remote-access`), root-shell
-`opentrons_disable_crs` (password `{robot_serial}-0000`) to turn CRS off, and
-EXEC-2176 wipe as fallback. Enter-CRS no longer auto-creates `testadmin` /
-`testuser`; create them manually. See [crs-testing.md](crs-testing.md).
+When CRS is on, `RobotHttpSession` attaches an optional bearer token (ROPC via
+`clients/oauth.py`). Enablement is one-way and gated:
+`flex-test crs enable --confirm-one-way`. Restore: serial **remote-access
+carveout** for SSH/Jupyter while CRS stays on (`flex-test serial allow-remote-access`),
+root-shell `opentrons_disable_crs` (password `{robot_serial}-0000`) to turn CRS
+off, and EXEC-2176 wipe as fallback. See [crs-testing.md](crs-testing.md) and
+[crs-on-setup.md](crs-on-setup.md).
 
 ## Future agent integration
 
@@ -116,6 +119,8 @@ Capability descriptors (`CapabilityDescriptor`) already carry name, description,
 
 ## Related operator docs
 
+- [CRS testing](crs-testing.md) (dual-mode SSOT + PRD coverage matrix)
+- [CRS-on setup](crs-on-setup.md)
 - [Pyro / protocol-subprocess testing](pyro-testing.md) on internal Flex builds (SSH + HTTP suites; harness gaps)
 - [FTDI serial console](serial-console.md) (`flex-test serial`; Tabby alternative)
 - [Robot logs](robot-logs.md) (audit vs diagnostic vs protocol run logs)

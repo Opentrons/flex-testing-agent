@@ -26,9 +26,10 @@ work. We need:
 | **2. Deck config** | part of known-state setup | REVERSIBLE | PUT known cutouts (HS on D1, trash A3, slots). |
 | **3. LPC / offsets** | part of known-state setup | REVERSIBLE + motion if probe | Prefer applying known offsets via HTTP when full probe LPC is blocked; live LPC only with explicit motion gate. |
 | **4. Seed run history** | `flex-test seed-runs` | PHYSICAL_MOTION | Dry deck, tip detection / sensing off, real motion; see inventory below. |
+| **4b. LPC jog timing** | `flex-test lpc-jog-timing` | PHYSICAL_MOTION | Many random `moveRelative` jogs in a high-Z safe box on C2; latency only (no offset persist). |
 | **5. Suite probes** | `probe` / `crs-off-*` / `api-suite` / latency | varies | Always run-state preflight (`docs/crs-testing.md`). |
 
-Phase 0 → 1 → 2 are safe to automate without tip pickup. Phase 3–4 need an
+Phase 0 → 1 → 2 are safe to automate without tip pickup. Phase 3–4 / 4b need an
 operator-confirmed clear deck and attached instruments/modules.
 
 ## KansasFLEX hardware assumptions
@@ -91,6 +92,38 @@ Deck: keep trash **A3** and HS **D1**; seed uses free slot **C2** with a
 definition-only tiprack load and high Z (`+40 mm` above well top) so dry deck
 without a physical tiprack is safer. Door must be closed (`requiresClosedDoor`).
 
+## LPC jog timing (`flex-test lpc-jog-timing`)
+
+Same HTTP map as `lpc_scripted` (maintenance run, virtual tiprack on **C2**,
+approach at A1 top + 40 mm) but walks many random `moveRelative` jogs for
+latency instead of persisting an offset. Planner: `fixtures/lpc_jog_space.py`.
+
+Coordinates are millimetres **relative to the approach pose**. Origin is that
+pose. +Z is away from the deck. The box never allows negative Z, so the pipette
+never moves closer to the deck than the 40 mm approach.
+
+| Axis | Min (mm) | Max (mm) | Why |
+|------|----------|----------|-----|
+| X | -2 | +12 | A1 is back-left of a 96 rack; +X into the grid toward H |
+| Y | -12 | +2 | -Y into the grid toward A12 |
+| Z | 0 | +20 | Never toward the deck; extra height only |
+
+Step sizes: 0.1 / 0.5 / 1.0 / 2.0 mm (LPC UI 10 mm is skipped; the box is
+smaller). Default 80 jogs (max 400), RNG seed 42, `savePosition` every 10 jogs,
+then return-to-approach and home. KansasFLEX default pipette: right
+`p50_single_flex`.
+
+Gates: `ALLOW_MUTATIONS=true`, required `--confirm-clear-deck`, door closed,
+estop clear, pipette on mount. Leftover maintenance run is deleted first.
+
+```bash
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck --jogs 200 --rng-seed 42
+```
+
+JSON under `ARTIFACT_DIRECTORY/timing/lpc-jog-timing-*.json`. Plan:
+[lpc-jog-timing.yaml](test-suggestions/lpc-jog-timing.yaml).
+
 ## Latency metrics (every phase records spans)
 
 Timing module: `orchestration/timing.py` → JSON under
@@ -110,7 +143,12 @@ Timing module: `orchestration/timing.py` → JSON under
 | `run.play_to_first_command` | POST play | first command `succeeded`/`running` | PE / Pyro path |
 | `run.cancel_latency` | POST stop | status `stopped` | |
 | `camera.picture` | POST picture | 200 JPEG | current-run interactions |
-| `lpc.create_maintenance_run` | POST maintenance_runs | 201 | LPC seed |
+| `lpc.create_maintenance_run` | POST maintenance_runs | 201 | LPC seed / jog timing |
+| `lpc.setup_approach` | loadPipette through moveToWell | succeeded | LPC jog timing |
+| `lpc.jog.NNN.{axis}` | one moveRelative | succeeded | LPC jog timing (per jog) |
+| `lpc.savePosition.NNN` | savePosition after a jog | succeeded | LPC-like confirm |
+| `lpc.return_to_approach` | undo XY/Z to origin | succeeded | LPC jog timing |
+| `lpc.home` | home after jogs | succeeded | LPC jog timing |
 | `lpc.store_offset` | POST labwareOffsets | 201 | LPC seed persist |
 
 Always stamp: robot `system_version`, `api_version`, host, channel, whether
@@ -133,6 +171,7 @@ ALLOW_MUTATIONS=true uv run flex-test known-state
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
 ALLOW_MUTATIONS=true uv run flex-test seed-runs --seed simple_home_move
 ALLOW_MUTATIONS=true uv run flex-test seed-runs --seed lpc_scripted
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
 ```
 
 Python: import capabilities (`reset_robot_data`, `install_build`, timing
@@ -214,10 +253,11 @@ When aggregating later:
 ## Safety
 
 - Mutations gated (`ALLOW_MUTATIONS`)
-- Never enable CRS
+- Enable CRS only via `flex-test crs enable --confirm-one-way` (one-way API)
 - Never reset `authorizedKeys` unless explicitly requested
-- Physical motion / play only when the operator asks for seed-runs / known-state
-  motion phases; deck must be clear; HS at API min 37 °C then deactivate; shake &lt; 5 s
+- Physical motion / play only when the operator asks for `seed-runs`,
+  `lpc-jog-timing --confirm-clear-deck`, or known-state motion phases; deck must
+  be clear; HS at API min 37 °C then deactivate; shake &lt; 5 s
 - Re-discover `ROBOT_HOST` after reboot (DHCP)
 
 ## Related

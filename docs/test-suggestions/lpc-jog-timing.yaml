@@ -1,0 +1,85 @@
+id: lpc-jog-timing
+title: LPC random-jog latency in a high-Z safe box
+summary: >
+  Drive many LPC-like maintenance-run moveRelative jogs over a virtual tiprack
+  on empty C2, staying inside a high-Z geometric box so the pipette never moves
+  closer to the deck than the approach height. Record per-jog and savePosition
+  latency for Pyro vs non-Pyro compare. PHYSICAL_MOTION; operator-gated.
+status: draft
+updated: "2026-08-12"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: v10.0.0-alpha.0
+  robot_os: 10.0.0-alpha.1
+  tickets:
+    - key: RQA-5831
+      title: "Flex Pyro / protocol-subprocess validation"
+hardware_required:
+  - KansasFLEX (or equivalent Flex)
+  - pipette on the requested mount (default right p50_single_flex)
+  - empty slot C2 (virtual tiprack only; no physical labware)
+  - trash A3 and heater-shaker D1 may remain
+  - door closed, estop clear
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test status
+    - ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
+    - ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck --jogs 200 --rng-seed 42
+    - uv run flex-test timing
+    - uv run flex-test logs archive
+tests:
+  - id: A0
+    name: Preflight
+    why: Motion only with a clear C2, closed door, clear estop, and a pipette.
+    steps:
+      - uv run flex-test inspect (confirm ROBOT_HOST after DHCP)
+      - uv run flex-test status (door closed, pipette on right by default)
+      - Visually confirm C2 empty; trash A3 and HS D1 may stay
+      - Do not run without --confirm-clear-deck
+    result: skipped
+
+  - id: A1
+    name: Default 80-jog timing
+    why: Reproducible LPC-like random walk for latency (seed 42).
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
+      - Expect approach at A1 top + 40 mm; jogs 0.1/0.5/1/2 mm only
+      - "Safe box relative to approach: X -2..+12, Y -12..+2, Z 0..+20 (never negative Z)"
+      - savePosition every 10 jogs; return to approach; home; delete maintenance run
+      - Archive ARTIFACT_DIRECTORY/timing/lpc-jog-timing-*.json
+    result: skipped
+
+  - id: A2
+    name: High-volume 200 jogs
+    why: Stress PE / hardware-subprocess jog latency without leaving the box.
+    steps:
+      - ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck --jogs 200 --rng-seed 42
+      - Confirm mean/p50/p95/max for moveRelative and savePosition
+      - Confirm stats by axis (x/y/z)
+    result: skipped
+
+  - id: A3
+    name: Cross-build compare
+    why: Pyro vs non-Pyro LPC jog latency (RQA-5831).
+    steps:
+      - Run A1 on a non-Pyro baseline (e.g. 9.1.2-alpha.*) and on 10.0.0-alpha.*
+      - Diff metric ids lpc.jog.*, lpc.savePosition.*, lpc.setup_approach, lpc.home
+      - Do not treat a single max spike as a product bug without p95 context
+    result: skipped
+
+  - id: A4
+    name: Safety abort
+    why: Open door or engaged estop must refuse before motion.
+    steps:
+      - Open the door and rerun; expect refuse (ok=false, no jogs)
+      - Close door; if estop is engaged, expect refuse
+      - Missing pipette on the mount must refuse
+    result: skipped
+
+notes: >
+  Harness: fixtures/lpc_jog_space.py (pure planner), capabilities/lpc_jog_timing.py,
+  flex-test lpc-jog-timing. Reuses the scripted LPC HTTP map (maintenance run +
+  virtual tiprack) from docs/known-state-and-latency.md. This is not App/ODD LPC
+  UI; it is HTTP jog latency in a conservative high-Z box. Max --jogs 400.
+  Skip 10 mm LPC UI steps; the box is smaller than that.

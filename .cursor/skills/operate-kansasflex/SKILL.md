@@ -7,8 +7,9 @@ description: >-
   install, probing read-only endpoints, taking camera pictures, listing Flex
   OS releases, installing a robot OS build with ALLOW_MUTATIONS, running Pyro
   / protocol-subprocess validation, using the FTDI serial console
-  (`flex-test serial`) instead of Tabby, or archiving/reviewing diagnostic
-  robot logs after seed-runs / api-suite (`flex-test logs archive`).
+  (`flex-test serial`) instead of Tabby, running LPC jog timing
+  (`flex-test lpc-jog-timing --confirm-clear-deck`), or archiving/reviewing
+  diagnostic robot logs after seed-runs / api-suite (`flex-test logs archive`).
 ---
 
 # Operate KansasFLEX
@@ -35,7 +36,11 @@ If a needed call is missing, **extend the harness** (skill
 | Run presence | `flex-test run-state` |
 | OS install | `flex-test put …` |
 | Logs | `flex-test logs list\|archive` |
+| CRS-off API suite | `flex-test probe\|crs-off-b\|c\|api-suite` |
+| CRS-on API suite | `flex-test crs lockdown\|auth-matrix\|probe\|suite\|settings-suite\|users-api` |
 | CRS audit periods | `flex-test audit list\|download` |
+| Seed run history / LPC | `flex-test seed-runs` |
+| LPC jog latency (safe box) | `flex-test lpc-jog-timing --confirm-clear-deck` |
 | Boot / DHCP / SSH down | `flex-test serial …` (not HTTP) |
 
 ## Prerequisites
@@ -77,8 +82,22 @@ ALLOW_MUTATIONS=true uv run flex-test api-suite
 ALLOW_MUTATIONS=true uv run flex-test crs-off-b --create-fixtures
 ALLOW_MUTATIONS=true uv run flex-test crs-off-c
 
+# CRS-on (HTTPS + fixture users; docs/crs-on-setup.md)
+# Enable only when the operator explicitly asks (one-way API):
+# ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
+ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --show-failures
+ROBOT_USE_HTTPS=true uv run flex-test crs auth-matrix
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --include-lockdown
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+uv run flex-test audit list
+
 # Seed succeeded/paused/failed/LPC history for Tier B (physical motion)
 ALLOW_MUTATIONS=true uv run flex-test seed-runs
+
+# LPC-like random jogs in a high-Z safe box (C2 empty; never toward deck)
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
+ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck --jogs 200
 
 # After seed / api-suite / install verification: archive + review diagnostic logs
 uv run flex-test logs list
@@ -128,10 +147,13 @@ update). Kernel printk on the FTDI console is expected and useful
 ([docs/serial-console.md](../../docs/serial-console.md)). Details:
 [docs/crs-testing.md](../../docs/crs-testing.md).
 
-Enter / exit CRS (manual operator flow; harness never enables CRS):
+Enter / exit CRS:
 
-- Password for enter CRS and for `opentrons_disable_crs`: `{robot_serial}-0000`
-- Create `testadmin` / `testuser` yourself after enter CRS (no longer auto-created)
+- Enable (gated, one-way): `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`
+  only when the operator explicitly asks. Catalog probes never PATCH enable.
+- Password for ODD enter-CRS and for `opentrons_disable_crs`: `{robot_serial}-0000`
+- Create `testadmin` / `testuser` yourself after enter CRS (no longer auto-created),
+  or use `flex-test crs provision-users` (`flex_test_*` fixtures)
 - Disable: root SSH or serial `opentrons_disable_crs` (not a protocol subprocess)
 
 ## Robot logs (audit / diagnostic / protocol run)
@@ -147,6 +169,8 @@ Do not confuse those with FTDI harness tees in `artifacts/serial/`.
 ```bash
 uv run flex-test logs list
 uv run flex-test logs archive
+uv run flex-test audit list
+uv run flex-test audit download <period-id>
 ```
 
 ## Post-suite log archive and review
@@ -253,14 +277,19 @@ On external `10.0.0-alpha.*` (and historical internal `4.0.0-alpha.*`) builds wi
 
 ## Live protocol play (physical motion)
 
-The harness has **no first-class motion capability**. Do **not** invent one or
-play protocols unless the user **explicitly** asks for live motion / tip smoke.
+Gated motion CLIs (need `ALLOW_MUTATIONS=true` and an explicit operator request):
+
+- `flex-test seed-runs` (history seeding, including `lpc_scripted`)
+- `flex-test lpc-jog-timing --confirm-clear-deck` (random jogs in a high-Z box on empty C2; never toward the deck)
+
+Do **not** invent ungated home/move/jog commands. Live protocol **play** (tip pickup)
+only when the user **explicitly** asks.
 
 When explicitly requested:
 
 1. Confirm deck/instruments (tiprack position, clear deck, door closed, estop clear).
 2. Use a documented protocol under `docs/test-suggestions/protocols/`.
-3. Drive play via robot HTTP run actions (or future gated capability), not ad-hoc shell.
+3. Drive play via robot HTTP run actions (or the gated CLIs above), not ad-hoc shell.
 4. Prefer `return_tip` when no trash is loaded.
 
 ## Python entrypoints
@@ -276,8 +305,8 @@ Use `FlexRobot` as async context manager. Prefer capabilities over raw clients f
 
 ## Safety reminders
 
-- Never enable access control
-- Do not implement harness motion capabilities; live play only on explicit user request
+- Enable access control only via `flex-test crs enable --confirm-one-way` when the operator explicitly asks
+- Do not implement ungated motion; use `seed-runs` / `lpc-jog-timing` or live play only on explicit user request
 - Default pytest excludes `requires_robot` / `mutates_robot`
 - Live robot tests: `uv run pytest -m requires_robot`
 - Service restarts and run mutations may need operator approval in agent sessions

@@ -9,8 +9,9 @@ This harness operates against a physical Flex robot. Safety is enforced in code 
 3. **Mutations disabled by default** (`ALLOW_MUTATIONS=false`).
 4. **Dry-run blocks mutations** (`DRY_RUN=true`).
 5. **Physical motion is gated** (`PHYSICAL_MOTION` requires `ALLOW_MUTATIONS=true`
-   and an explicit operator request). The supported entrypoint is
-   `flex-test seed-runs` ([known-state-and-latency.md](known-state-and-latency.md)).
+   and an explicit operator request). Supported entrypoints:
+   `flex-test seed-runs` and `flex-test lpc-jog-timing --confirm-clear-deck`
+   ([known-state-and-latency.md](known-state-and-latency.md)).
    Do not invent ad-hoc motion URLs or ungated home/move CLI commands.
 6. **No arbitrary shell / HTTP / URL construction** for agents.
 7. **Credential redaction** in evidence writers.
