@@ -4,8 +4,9 @@
 They answer different questions. Do not conflate them with harness-local
 transcripts under `artifacts/serial/` ([serial-console.md](serial-console.md)).
 
-Source notes: internal engineering summary (Slack / Authorship + EXEC). Deeper
-audit design: [Audit Logging (PER)](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5433294945/Audit+Logging).
+Source notes: internal engineering summary (Slack / Authorship + EXEC) plus
+CRS product briefing (File Manager / log-type relationships). Deeper audit
+design: [Audit Logging (PER)](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5433294945/Audit+Logging).
 CRS context: [crs-testing.md](crs-testing.md).
 
 ## Quick chooser
@@ -28,27 +29,41 @@ CRS context: [crs-testing.md](crs-testing.md).
     (CRS only,            logs                logs
      signed periods)      (“usual” support)   (run UI / commands)
            │                   │                   │
+           │ includes run logs │                   │ might include
+           │ (not diagnostic)  │                   │ protocol source
            └───────────────────┴───────────────────┘
                                │
-                    Robot HTTP / UI export
+         File Manager (App + ODD) / robot HTTP export
                                │
               FTDI serial (kernel + shell) ──► artifacts/serial/
 ```
 
+Product File Manager (ODD Settings → “Download and delete robot files”, also
+Desktop) is the human UI that lists **Audit Logs**, **Diagnostic Files**, and
+**Protocol Run Records** together, with Download all / Delete all and ODD USB
+export. CRS robots **cannot auto-delete** records to free disk; storage
+warnings are expected. This harness does not drive File Manager; use
+`flex-test audit` and `flex-test logs archive`.
+
 ## 1. Audit logs (CRS)
 
 **What:** Composite, **cryptographically signed** packages produced only when
-**CRS is active** (`accessControlEnabled`). Built for non-repudiation / compliance
-style questions (“who did this?”), not day-to-day debug.
+**CRS is active** (`accessControlEnabled`). These are what an FDA-style audit
+would look at. Built for non-repudiation (“who did this and why?”), not
+day-to-day debug. Signing is done by **key-server** (CAAM /
+`/var/lib/opentrons-key-server/ot-secure-volume`).
 
 **Composite contents:**
 
 | Piece | Role |
 |-------|------|
-| User action log | Every person-driven action that caused a change |
-| Protocol run log(s) | Runlog of any protocol that ran in the period |
+| User action log | Robot actions taken, the account that launched them, and the documentation (reason) they provided |
+| Protocol run log(s) | Runlog of any protocol that ran in the period (audit **includes** run logs) |
 | Robot identity file | Identifies the robot for the package |
 | Signing public key | Verifies the robot’s signature on the package |
+
+Audit logs **are not** diagnostic logs. Protocol run logs **are not**
+diagnostic logs either.
 
 **Periods:**
 
@@ -56,7 +71,9 @@ style questions (“who did this?”), not day-to-day debug.
 - A period **ends** when (1) the robot **boots**, or (2) a **protocol ends**.
 - A new period **starts** as soon as one ends.
 - There is **always** an active period.
-- Packages can be **downloaded at any time**.
+- Packages can be **downloaded at any time** (harness: `flex-test audit download`).
+- Product default on Desktop: after a protocol ends, users are prompted to
+  download the current period and save it off-robot.
 
 **When they exist:** Only with CRS on. CRS-off lab robots will not have this
 stream.
@@ -80,7 +97,8 @@ Never invent ad-hoc URLs.
 ## 2. Diagnostic logs
 
 **What:** The logs people usually mean when they say “pull / send robot logs.”
-Operational and developer breadcrumbs across subsystems.
+Operational and developer breadcrumbs across subsystems. Older stream; CRS did
+**not** redesign it.
 
 **Typical contents:**
 
@@ -109,10 +127,13 @@ Archives land under `ARTIFACT_DIRECTORY/logs/<UTC-stamp>-<host>/` with
 
 ## 3. Protocol run logs
 
-**What:** The document of **every command** in a protocol run. Feeds the
-ongoing-run UI in the app and on the ODD.
+**What:** JSON used by App and ODD to render a run (labware, pipettes, modules,
+every command, run status including error recovery). Older stream; CRS did
+**not** redesign it. Audit periods **embed** this when a protocol ran in the
+period; that does not make run JSON a substitute for diagnostic dumps.
 
-**May also include:** Protocol source and RTP (runtime parameter) files.
+**May also include:** Protocol source, CSVs, images, and RTP (runtime parameter)
+files.
 
 **Example questions:** Which command was current when the run paused? What was
 the command sequence for this `runId`?
@@ -140,6 +161,7 @@ package, even though audit periods embed a runlog when a protocol ran.
 | Attach focused log evidence to every bug filed from the review | File log-review bugs with summary only and no excerpts on the ticket |
 | Save FTDI sessions to `artifacts/serial/` for boot / no-network cases | Invent parallel log download stacks outside clients → capabilities → CLI |
 | Cite this doc + PER Audit Logging when extending harness coverage | Enable CRS from the harness to “get audit logs” |
+| Expect File Manager storage warnings on long-lived CRS-on robots | Assume CRS auto-deletes old run records to free disk |
 
 ### Post-suite archive and review (required)
 
@@ -156,7 +178,7 @@ Full agent checklist: `.cursor/skills/operate-kansasflex/SKILL.md`.
 
 ## Related
 
-- [crs-testing.md](crs-testing.md) (CRS on/off, remote-access carveout)
+- [crs-testing.md](crs-testing.md) (product model, CRS on/off, remote-access carveout)
 - [serial-console.md](serial-console.md) (FTDI + harness transcripts)
 - [safety-model.md](safety-model.md)
 - [Audit Logging (PER)](https://opentrons.atlassian.net/wiki/spaces/PER/pages/5433294945/Audit+Logging)

@@ -106,9 +106,23 @@ def _mock_tier_c_mutations() -> None:
         )
     )
     respx.get("http://127.0.0.1:31950/runs/r-tierc").mock(
-        return_value=httpx.Response(
-            200, json={"data": {"id": "r-tierc", "current": True, "status": "idle"}}
-        )
+        side_effect=[
+            httpx.Response(
+                200, json={"data": {"id": "r-tierc", "current": True, "status": "idle"}}
+            ),
+            httpx.Response(
+                200,
+                json={"data": {"id": "r-tierc", "current": True, "status": "stopped"}},
+            ),
+            httpx.Response(
+                200,
+                json={"data": {"id": "r-tierc", "current": True, "status": "stopped"}},
+            ),
+            httpx.Response(
+                200,
+                json={"data": {"id": "r-tierc", "current": False, "status": "stopped"}},
+            ),
+        ]
     )
     respx.post("http://127.0.0.1:31950/runs/r-tierc/actions").mock(
         return_value=httpx.Response(

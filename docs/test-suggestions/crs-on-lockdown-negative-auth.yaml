@@ -43,7 +43,9 @@ tests:
       - uv run flex-test crs lockdown --show-failures
       - GET without credentials → expect 200/404 (reads not gated by CRS)
       - POST/PATCH/PUT/DELETE without credentials → expect 401/403
+        (except /clientData, which is not under CRS; RQA-5918 expected)
       - Fail on mutations returning 200/201/204 without valid credentials
+        (except /clientData)
       - Robot-server mutation non-401/403 logged as report-only
     result: skipped
 
@@ -74,8 +76,9 @@ notes: >
   Actors: none (no header), bad_bearer, malformed_bearer, bad_oauth (wrong ROPC
   password), auditor (read-only), operator (user scopes). Public routes:
   GET /health, GET /server/update/health, GET /auth/settings/accessControlEnabled,
-  POST /auth/oauth2/token. CRS gates mutations only; GET works with or without
-  credentials. Strict services: auth-server and audit-server mutations.
+  POST /auth/oauth2/token, PUT/DELETE/GET /clientData (not under CRS; RQA-5918).
+  CRS gates mutations only; GET works with or without credentials. Strict
+  services: auth-server and audit-server mutations.
   Safety: catalog excludes DISRUPTIVE+ endpoints; auditor/operator only probe
   mutation deny cases (never send authed POST expecting 200). GET reachability:
   flex-test crs auth-matrix and Tier A unauthenticated baseline. Implementation:

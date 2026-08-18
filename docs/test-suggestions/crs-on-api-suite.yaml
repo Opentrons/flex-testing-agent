@@ -94,7 +94,8 @@ tests:
 notes: >
   Product contract under test: CRS gates mutations, not GETs. Public routes:
   GET /health, GET /server/update/health, GET /auth/settings/accessControlEnabled,
-  POST /auth/oauth2/token. Setup: docs/crs-on-setup.md. Negative-auth detail:
+  POST /auth/oauth2/token, and /clientData (not under CRS; RQA-5918 expected).
+  Setup: docs/crs-on-setup.md. Negative-auth detail:
   crs-on-lockdown-negative-auth.yaml. Settings tunables: crs-auth-settings-behavior.yaml.
   User CRUD / password reset: crs-user-management-onboarding.yaml. Audit packages:
   crs-audit-logs.yaml.

@@ -1048,6 +1048,8 @@ def seed_runs_command(
             parse_seed_ids,
             run_seed_runs,
         )
+        from flex_testing_agent.orchestration.crs_auth import optional_access_token
+        from flex_testing_agent.orchestration.lock import RobotOperationLock
         from flex_testing_agent.robots.flex import FlexRobot
 
         try:
@@ -1057,17 +1059,21 @@ def seed_runs_command(
             console.print(f"[red]{exc}[/red]")
             return 2
 
-        async with FlexRobot(resolved) as robot:
-            try:
-                result = await run_seed_runs(
-                    robot,
-                    seed_ids=seed_ids,
-                    update_firmware=not no_fw_update,
-                    strict=strict,
-                )
-            except Exception as exc:
-                console.print(f"[red]{exc}[/red]")
-                return 2
+        host = resolved.require_robot_host()
+        artifact_root = resolved.ensure_artifact_directory()
+        try:
+            token = await optional_access_token(resolved, require_when_enabled=True)
+            with RobotOperationLock(host, artifact_root / "locks"):
+                async with FlexRobot(resolved, access_token=token) as robot:
+                    result = await run_seed_runs(
+                        robot,
+                        seed_ids=seed_ids,
+                        update_firmware=not no_fw_update,
+                        strict=strict,
+                    )
+        except Exception as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 2
 
         console.print(f"[dim]Preflight:[/dim] {result.preflight}")
         table = Table(title="Seed runs")

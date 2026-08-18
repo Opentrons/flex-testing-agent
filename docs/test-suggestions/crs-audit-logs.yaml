@@ -77,4 +77,7 @@ notes: >
   flex-test logs archive (docs/robot-logs.md). Hash-chain verification in the
   white-label Log File Viewer is a separate product; this plan only checks robot
   HTTP list/download. Delete-period (token from export) is DISRUPTIVE and not
-  automated here.
+  automated here. Periods rotate at boot and when a protocol ends; Desktop may
+  prompt to download the current period after a run. File Manager (App/ODD) is
+  the operator UI for the same three families (audit / diagnostic / run records)
+  and is out of scope for this HTTP plan. CRS robots do not auto-delete records.

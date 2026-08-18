@@ -10,10 +10,12 @@ from flex_testing_agent.capabilities.crs_on_lockdown import (
 from flex_testing_agent.catalog.crs_on_lockdown import (
     endpoints_for_crs_on_lockdown,
     is_lockdown_probe_safe,
+    is_public_when_crs_on,
     resolve_lockdown_path,
     unauthenticated_should_deny,
 )
 from flex_testing_agent.catalog.endpoints import (
+    FLEX_HTTP_ENDPOINTS,
     ApiService,
     EndpointSpec,
     HttpMethod,
@@ -53,6 +55,26 @@ def test_unauthenticated_should_deny_mutations_only() -> None:
     assert not unauthenticated_should_deny(health)
     assert not unauthenticated_should_deny(runs)
     assert unauthenticated_should_deny(post_runs)
+
+
+def test_client_data_is_public_when_crs_on() -> None:
+    """RQA-5918: /clientData is App/ODD coordination, not under CRS."""
+    names = {
+        "get_clientData_key",
+        "put_clientData_key",
+        "delete_clientData_key",
+        "delete_clientData",
+    }
+    specs = [ep for ep in FLEX_HTTP_ENDPOINTS if ep.name in names]
+    assert {ep.name for ep in specs} == names
+    for spec in specs:
+        assert is_public_when_crs_on(spec)
+        assert not unauthenticated_should_deny(spec)
+        assert _expectation_for_actor(spec, LockdownActor.NONE) == "public_ok"
+        assert _expectation_for_actor(spec, LockdownActor.BAD_BEARER) == "public_ok"
+        malformed = LockdownActor.MALFORMED_BEARER
+        assert _expectation_for_actor(spec, malformed) == "public_ok"
+        assert _expectation_for_actor(spec, LockdownActor.AUDITOR) is None
 
 
 def test_resolve_lockdown_path_substitutes_placeholders() -> None:

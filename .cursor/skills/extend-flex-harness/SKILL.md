@@ -83,9 +83,9 @@ Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
 `flex-test status` and `flex-test wait-health` already cover instruments/door/subsystems
 and post-install `/health` polling.
 
-Restart recovery failures after **individual systemd unit restarts** (nameserver /
-hardware-api reattach) are tracked as Low / expected for now (RQA-5789 /
-RQA-5790). Prefer documenting **full robot reboot** as operator recovery. Do not
+[oe-core#373](https://github.com/Opentrons/oe-core/pull/373) grouped systemd
+`PartOf=` restart closed RQA-5789 / RQA-5790 on `v10.0.0-alpha.3`. Prefer
+documenting **full robot reboot** as operator recovery. Do not
 paper over product issues by silently restarting services unless the user asks
 for recovery.
 

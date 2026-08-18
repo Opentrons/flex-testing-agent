@@ -69,6 +69,10 @@ startup). Prefer waiting for `/health` 200, or SSH/serial and check services
 
 ## Process layout
 
+CRS is why this split exists. The stack used to be a **single process** under
+`opentrons-robot-server`. Compliance mode needs protocol execution independent
+of HTTP, so the default OS line is three processes talking over **Pyro5**:
+
 ```text
 opentrons-pyro-nameserver     (Pyro5 NS, localhost:9090)
         ↑ register / resolve
@@ -80,6 +84,18 @@ hardware-api  robot-server         ot-simulating-protocol
                robot-server-        DirectedRunProcess)
                resource)
 ```
+
+| Process | Role | Runs as |
+|---------|------|---------|
+| `opentrons-hardware-api` | Pipettes, modules, door, motion (`OT3API` PSO) | root |
+| `opentrons-robot-server` | HTTP API, run setup, general interaction | root |
+| `ot-protocol` executor | Orchestrator + protocol engine for a live run | `ot-protocol` user (limited r/w) |
+
+Each service exposes a `PyroSynchronousObject`; callers use an
+`AsyncClientPyroObject` proxy. Objects that cross the process boundary must be
+serializable (enums/Pydantic in a registered package; dataclasses need
+`to_pyro_dict` / `from_pyro_dict`). Full product model:
+[crs-testing.md](crs-testing.md#protocol-subprocess-why-pyro-exists).
 
 Well-known nameserver entries:
 
@@ -94,6 +110,12 @@ On CRS-on robots, uncurrenting a run may return **409 `RunSignoffRequired`**
 until the run is signed off. That is access-control behavior, not a Pyro IPC
 failure. Prefer CRS-off (or a signed-off run) when validating process teardown
 ([RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)).
+
+If the operator **explicitly** asks to play a protocol while CRS is on: App/ODD
+**Pause** prompts for documentation and does not pause until the note is
+submitted. That is expected. Open the door (or E-Stop in an emergency). Do not
+file it as a Pyro or run-control bug. See
+[crs-testing.md](crs-testing.md#documentation-required-reason-for-interaction).
 
 Monorepo pointers (research clone `upstream/opentrons`, tag `v10.0.0-alpha.0`
 or matching `ot3@` archaeology tag):
@@ -167,22 +189,19 @@ Do **not** treat ordered `systemctl restart` of
 `opentrons-pyro-nameserver` / `opentrons-hardware-api` / `opentrons-robot-server`
 as the default recovery path in operator notes or RQA bugs.
 
-### Why we stopped recommending service restart
+### Why we still prefer reboot over service restart
 
-Partial service restarts were useful for **forcing** known IPC failure modes
-during early validation, but:
+Partial service restarts were useful for **forcing** IPC failure modes during
+early validation. [oe-core#373](https://github.com/Opentrons/oe-core/pull/373)
+(`PartOf=` on the three pyro units, verified Closed on KansasFLEX
+`v10.0.0-alpha.3`) now restarts nameserver, hardware-api, and robot-server as a
+group, which fixed [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789)
+and [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790).
 
-1. Dev guidance (2026-08): nameserver / producer **re-register after service
-   restart** gaps are **low priority and expected** for now (may be fixed later).
-   Tracked historically as [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789)
-   and [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) (priority Low).
-2. Full reboot is what operators and support should do; bugs should say that.
-3. Skipping service-restart experiments avoids filing noise that looks like
-   day-to-day product defects.
-
-Optional deep-dive (not required for each alpha): still fine to reproduce
-RQA-5789/5790 deliberately for regression once a fix lands. Do not block
-`10.0.0-alpha.*` validation on those cases.
+Full reboot is still what operators and support should do. Do not prescribe
+ordered `systemctl restart` as the recovery path in RQA bugs. Optional
+regression of the grouped-restart behavior is fine; do not block
+`10.0.0-alpha.*` validation on it.
 
 ### Post-install wait (before declaring broken)
 
@@ -230,8 +249,8 @@ Kept for archaeology. Re-run on `v10.0.0-alpha.0` and update the new YAML.
 | A1 | **PASS** | nameserver, hardware-api, robot-server active+enabled |
 | A2 | **PASS** | `OT3API` in NS ~0.05s; `get_fw_version` → `72` |
 | A3 | **PASS** | `/health` 200; instruments/subsystems via HW proxy |
-| A4 | **FAIL** (Low / expected) | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) NS restart, no re-register |
-| A5 | **FAIL** (Low / expected) | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) HW restart, stale RS proxy |
+| A4 | **FAIL** (later Closed) | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) NS restart, no re-register |
+| A5 | **FAIL** (later Closed) | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) HW restart, stale RS proxy |
 | B1 | **PASS** | `/instruments` + `/subsystems/status` healthy |
 | B2 | **SKIP** | no modules attached |
 | B3 | **PASS** | two door open/close cycles on `/robot/door/status` |
@@ -251,8 +270,8 @@ Kept for archaeology. Re-run on `v10.0.0-alpha.0` and update the new YAML.
 | A1 | Three systemd units active | Required each build |
 | A2 | `OT3API` in nameserver quickly | Required |
 | A3 | `/health` OK with HW proxy usable | Required |
-| A4 | Restart **nameserver alone** | **Skip by default** (Low / expected; RQA-5789) |
-| A5 | Restart **hardware-api** alone | **Skip by default** (Low / expected; RQA-5790) |
+| A4 | Restart **nameserver** | Optional regression: grouped `PartOf=` restart (RQA-5789 Closed) |
+| A5 | Restart **hardware-api** | Optional regression: grouped `PartOf=` restart (RQA-5790 Closed) |
 
 ### B. Hardware IPC (lower line)
 
@@ -318,8 +337,8 @@ Many are assigned; several Closed. Keep linking when regressing on `10.0.0-alpha
 | [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787) | robot-server startup / nginx 502 after update during HW firmware flash | Highest; Casey |
 | [RQA-5808](https://opentrons.atlassian.net/browse/RQA-5808) | `/health` 500 `DatabaseFailedToInitialize` (EBUSY) | Tamar |
 | [RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788) | `unhashable type: 'dict'` on subsystem updates | Closed |
-| [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register | **Low / expected** |
-| [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart | **Low / expected** |
+| [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register | Closed on `v10.0.0-alpha.3` (oe-core#373 `PartOf=`) |
+| [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart | Closed on `v10.0.0-alpha.3` (oe-core#373 `PartOf=`) |
 | [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) | Uncurrent clears NS `ot-protocol` but leaves processes | High; Casey |
 | [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) | Succeeded runs return empty `/runs/{id}/commands` | Closed |
 | [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) | Legacy StateSummary missing camera field | Josh |
@@ -341,4 +360,5 @@ with SSH and HTTP. Natural extensions (follow `clients/ → capabilities/ → CL
 - Spec: Confluence PER Pyro / subprocess pages (link above)
 - Versions: [robot-versions.md](robot-versions.md)
 - Safety: [safety-model.md](safety-model.md)
+- CRS product model (why subprocess exists): [crs-testing.md](crs-testing.md)
 - Operate skill: `.cursor/skills/operate-kansasflex/SKILL.md`

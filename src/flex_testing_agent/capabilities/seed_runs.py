@@ -27,6 +27,11 @@ from flex_testing_agent.clients.subsystems import SubsystemsClient
 from flex_testing_agent.logging import get_logger
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
+from flex_testing_agent.orchestration.run_state import (
+    DesiredRunState,
+    ensure_run_state,
+    release_current_run,
+)
 from flex_testing_agent.orchestration.timing import TimingSession
 from flex_testing_agent.robots.flex import FlexRobot
 
@@ -52,8 +57,21 @@ SEED_RUNS_DESCRIPTOR = CapabilityDescriptor(
         "Operator explicitly requested live motion / seed-runs",
         "Deck clear except trash A3 and heater-shaker D1",
         "Free slot C2 for lpc_scripted virtual tiprack",
+        "CRS on: ROBOT_USERNAME / ROBOT_PASSWORD (OAuth + protocol-log signoff)",
     ],
 )
+
+SEED_SIGNOFF_LABEL = "flex-testing-agent seed-runs"
+
+
+def seed_signoff_label(robot: FlexRobot) -> str | None:
+    """Return a protocol-log signoff label when the session is OAuth-backed."""
+    if robot.session.access_token is None:
+        return None
+    notes = robot.settings.robot_user_notes
+    if notes is not None and not notes.strip():
+        return SEED_SIGNOFF_LABEL
+    return notes or SEED_SIGNOFF_LABEL
 
 
 class SeedId(StrEnum):
@@ -463,10 +481,13 @@ async def _run_one_seed(
         )
 
     # Uncurrent finished runs so the next seed can become current, unless the
-    # seed is meant to leave a current fixture (idle / paused).
+    # seed is meant to leave a current fixture (idle / paused). CRS-on needs
+    # protocol-log signoff before PATCH current=false.
     if not spec.leave_current:
         try:
-            await robot.runs.set_current(run_id, current=False)
+            await release_current_run(
+                robot, run_id, signed_by=seed_signoff_label(robot)
+            )
         except RobotApiError as exc:
             log.info("uncurrent_after_seed_failed", run_id=run_id, error=str(exc))
 
@@ -527,6 +548,14 @@ async def run_seed_runs(
         timing.api_version = health.api_version
     except Exception as exc:
         timing.note(f"health: {exc}")
+
+    await ensure_run_state(
+        robot,
+        DesiredRunState.NO_CURRENT,
+        ensure=True,
+        capability_name="seed_runs",
+        signed_by=seed_signoff_label(robot),
+    )
 
     selected = set(ALL_SEED_IDS)
     if seed_ids is not None:

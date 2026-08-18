@@ -83,6 +83,23 @@ class ProtocolsClient:
             expected_status=(200, 204),
         )
 
+    async def create_analysis(
+        self,
+        protocol_id: str,
+        *,
+        timeout: float = 120.0,
+        expected_status: tuple[int, ...] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """POST ``/protocols/{protocolId}/analyses`` (reanalysis)."""
+        return await self._session.post_json(
+            f"/protocols/{protocol_id}/analyses",
+            json_body={"data": {}},
+            timeout=timeout,
+            expected_status=expected_status or (201,),
+            extra_headers=extra_headers,
+        )
+
     async def list_analyses(self, protocol_id: str) -> list[dict[str, Any]]:
         """GET ``/protocols/{protocolId}/analyses``."""
         payload = await self._session.get_json(f"/protocols/{protocol_id}/analyses")

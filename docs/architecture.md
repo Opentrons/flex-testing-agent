@@ -96,8 +96,10 @@ Making MCP foundational would couple robot safety and auditability to one agent 
 
 ## Dual-mode CRS (access control)
 
-**CRS** (Compliance Ready Software) is the product name for robot
-`accessControlEnabled` (also called ACM / RCS in older docs). Design and suite
+**CRS** (Compliance Ready Software) is a robot **mode** that supplies 21 CFR
+Part 11 *tooling* (identity, signed audit, HTTPS). A CRS-on Flex is **not**
+itself Part 11 certified. API flag: `accessControlEnabled` (ACM / RCS in older
+docs). Product model, documentation-required / 451, File Manager, and suite
 tiers: [crs-testing.md](crs-testing.md).
 
 When CRS is off (default for KansasFLEX lab work), protected endpoints allow
@@ -106,12 +108,30 @@ The full HTTP inventory lives in `catalog/endpoints.py` (all methods); Tier A
 CRS-off coverage is parameter-free GETs via `ReadonlyClient`.
 
 When CRS is on, `RobotHttpSession` attaches an optional bearer token (ROPC via
-`clients/oauth.py`). Enablement is one-way and gated:
-`flex-test crs enable --confirm-one-way`. Restore: serial **remote-access
-carveout** for SSH/Jupyter while CRS stays on (`flex-test serial allow-remote-access`),
-root-shell `opentrons_disable_crs` (password `{robot_serial}-0000`) to turn CRS
-off, and EXEC-2176 wipe as fallback. See [crs-testing.md](crs-testing.md) and
+`clients/oauth.py`). Mutating requests also send `Opentrons-User-Notes`.
+`/clientData` is an exception: App/ODD in-memory coordination, not under CRS
+(unauthenticated PUT/DELETE 200 is expected; RQA-5918). Enablement is one-way
+and gated: `flex-test crs enable --confirm-one-way`.
+Restore: serial **remote-access carveout** for SSH/Jupyter while CRS stays on
+(`flex-test serial allow-remote-access`), root-shell `opentrons_disable_crs`
+(password `{robot_serial}-0000`) to turn CRS off, and EXEC-2176 wipe as
+fallback. See [crs-testing.md](crs-testing.md) and
 [crs-on-setup.md](crs-on-setup.md).
+
+HTTP servers involved (frontend talks to this cluster):
+
+```text
+Frontend
+   |
+auth-server  <->  robot-server, system-server, update-server
+audit-server <->  robot-server, system-server, update-server
+key-server        (CAAM: TLS certs + audit signing)
+```
+
+A typical mutation: `POST /auth/oauth2/token` → resource `POST` with bearer →
+resource `POST /auth/oauth2/introspect` → async audit event. Protocol execution
+is a **separate** `ot-protocol` process ([pyro-testing.md](pyro-testing.md)) so
+runs stay isolated from robot-server.
 
 ## Future agent integration
 
@@ -119,9 +139,9 @@ Capability descriptors (`CapabilityDescriptor`) already carry name, description,
 
 ## Related operator docs
 
-- [CRS testing](crs-testing.md) (dual-mode SSOT + PRD coverage matrix)
+- [CRS testing](crs-testing.md) (product model + dual-mode SSOT + PRD coverage)
 - [CRS-on setup](crs-on-setup.md)
-- [Pyro / protocol-subprocess testing](pyro-testing.md) on internal Flex builds (SSH + HTTP suites; harness gaps)
+- [Pyro / protocol-subprocess testing](pyro-testing.md) (CRS isolation of runs)
 - [FTDI serial console](serial-console.md) (`flex-test serial`; Tabby alternative)
 - [Robot logs](robot-logs.md) (audit vs diagnostic vs protocol run logs)
 - [Safety model](safety-model.md)

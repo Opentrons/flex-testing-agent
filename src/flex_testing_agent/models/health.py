@@ -21,6 +21,12 @@ class DiskDetails(BaseModel):
     images_directory_size_mb: float | None = Field(
         default=None, alias="imagesDirectorySizeMb"
     )
+    run_start_limit_free_space_mb: float | None = Field(
+        default=None, alias="runStartLimitFreeSpaceMb"
+    )
+    is_disk_space_below_run_start_limit: bool | None = Field(
+        default=None, alias="isDiskSpaceBelowRunStartLimit"
+    )
 
 
 class HealthReport(BaseModel):

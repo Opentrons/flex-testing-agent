@@ -128,6 +128,19 @@ async def test_session_includes_bearer_when_token_set() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_session_set_access_token_updates_header() -> None:
+    session = RobotHttpSession("http://127.0.0.1:31950", access_token="old")
+    session.set_access_token("new")
+    assert session.access_token == "new"
+    assert session._client.headers["Authorization"] == "Bearer new"
+    session.set_access_token(None)
+    assert session.access_token is None
+    assert "Authorization" not in session._client.headers
+    await session.aclose()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @respx.mock
 async def test_session_adds_user_notes_on_mutating_requests() -> None:
     notes = "flex-testing-agent test"

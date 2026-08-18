@@ -12,7 +12,7 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 
 - [README.md](README.md) — setup, CLI, safety warnings
 - [docs/architecture.md](docs/architecture.md) — layers and extension model
-- [docs/crs-testing.md](docs/crs-testing.md) — CRS-off / CRS-on dual-mode SSOT
+- [docs/crs-testing.md](docs/crs-testing.md) — CRS product model + dual-mode SSOT
 - [docs/crs-on-setup.md](docs/crs-on-setup.md) — HTTPS, users, CRS-on CLI
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
 - [docs/pyro-testing.md](docs/pyro-testing.md) — Pyro5 / protocol-subprocess on internal Flex builds

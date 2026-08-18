@@ -32,12 +32,18 @@ _MUTATION_METHODS: frozenset[HttpMethod] = frozenset(
 
 # Endpoints intentionally reachable without a bearer token when CRS is on.
 # ``post_oauth2_token`` is probed separately (bad credentials must not mint tokens).
+# ``/clientData`` is App/ODD in-memory coordination, not under CRS (RQA-5918
+# closed as expected: PUT/DELETE succeed with no token).
 PUBLIC_WHEN_CRS_ON: frozenset[str] = frozenset(
     {
         "get_health",
         "get_server_update_health",
         "get_auth_settings_accessControlEnabled",
         "post_oauth2_token",
+        "get_clientData_key",
+        "put_clientData_key",
+        "delete_clientData_key",
+        "delete_clientData",
     }
 )
 

@@ -54,6 +54,14 @@ class RobotHttpSession:
         """Return the optional bearer token for access-control-on mode."""
         return self._access_token
 
+    def set_access_token(self, token: str | None) -> None:
+        """Replace the bearer token on the shared httpx client."""
+        self._access_token = token
+        if token:
+            self._client.headers["Authorization"] = f"Bearer {token}"
+        else:
+            self._client.headers.pop("Authorization", None)
+
     async def __aenter__(self) -> RobotHttpSession:
         return self
 

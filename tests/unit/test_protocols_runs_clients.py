@@ -97,6 +97,17 @@ async def test_protocols_upload_multipart(
 @pytest.mark.unit
 @pytest.mark.asyncio
 @respx.mock
+async def test_protocols_create_analysis(session: RobotHttpSession) -> None:
+    respx.post("http://127.0.0.1:31950/protocols/p1/analyses").mock(
+        return_value=httpx.Response(201, json={"data": {"id": "a1"}})
+    )
+    payload = await ProtocolsClient(session).create_analysis("p1")
+    assert payload["data"]["id"] == "a1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
 async def test_runs_create_and_get(session: RobotHttpSession) -> None:
     respx.post("http://127.0.0.1:31950/runs").mock(
         return_value=httpx.Response(201, json={"data": {"id": "r1", "status": "idle"}})
@@ -453,6 +464,11 @@ async def test_tier_c_reversible_mutations(tmp_path: Path) -> None:
     respx.post("http://127.0.0.1:31950/runs").mock(
         return_value=httpx.Response(
             201, json={"data": {"id": "r-tierc", "current": True, "status": "idle"}}
+        )
+    )
+    respx.get("http://127.0.0.1:31950/runs/r-tierc").mock(
+        return_value=httpx.Response(
+            200, json={"data": {"id": "r-tierc", "current": True, "status": "stopped"}}
         )
     )
     respx.patch("http://127.0.0.1:31950/runs/r-tierc").mock(

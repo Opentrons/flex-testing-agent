@@ -8,11 +8,13 @@ See ``docs/crs-testing.md`` § Run state matrix.
 
 from __future__ import annotations
 
+import asyncio
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.logging import get_logger
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
@@ -127,8 +129,42 @@ async def release_current_run(
         ).lower()
         if status == "idle":
             await robot.runs.stop(run_id)
-        await robot.runs.sign_off(run_id, signed_by=signed_by)
-    await robot.runs.set_current(run_id, current=False)
+            for _ in range(20):
+                await asyncio.sleep(0.25)
+                status = (
+                    robot.runs.status_from_run(await robot.runs.get_run(run_id)) or ""
+                ).lower()
+                if status != "idle":
+                    break
+        last_signoff: RobotApiError | None = None
+        for _ in range(6):
+            try:
+                await robot.runs.sign_off(run_id, signed_by=signed_by)
+                last_signoff = None
+                break
+            except RobotApiError as exc:
+                if exc.status_code != 409:
+                    raise
+                last_signoff = exc
+                await asyncio.sleep(0.5)
+        if last_signoff is not None:
+            raise last_signoff
+    last_uncurrent: RobotApiError | None = None
+    for _ in range(6):
+        payload = await robot.runs.get_run(run_id)
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if isinstance(data, dict) and data.get("current") is not True:
+            return
+        try:
+            await robot.runs.set_current(run_id, current=False)
+            return
+        except RobotApiError as exc:
+            if exc.status_code != 409:
+                raise
+            last_uncurrent = exc
+            await asyncio.sleep(0.5)
+    if last_uncurrent is not None:
+        raise last_uncurrent
 
 
 async def _uncurrent_all(

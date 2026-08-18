@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 from flex_testing_agent.capabilities.crs_auth import access_token_for_username
@@ -20,6 +21,7 @@ _MATRIX_USERS: tuple[tuple[str, str], ...] = (
 )
 
 _ALLOW_STATUSES = frozenset({200, 404})
+TOKEN_REFRESH_AFTER_S = 90.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +106,12 @@ async def run_auth_matrix(settings: Settings) -> AuthMatrixResult:
     endpoints = endpoints_for_crs_on_auth_matrix()
     result = AuthMatrixResult()
     token_cache: dict[str, str] = {}
+    tokens_minted_at = 0.0
 
     for spec in endpoints:
+        if time.monotonic() - tokens_minted_at >= TOKEN_REFRESH_AFTER_S:
+            token_cache.clear()
+            tokens_minted_at = time.monotonic()
         await _run_endpoint_cases(settings, spec, result, token_cache)
 
     return result

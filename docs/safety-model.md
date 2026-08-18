@@ -20,9 +20,12 @@ This harness operates against a physical Flex robot. Safety is enforced in code 
 
 ## Access control / CRS
 
-**CRS** (Compliance Ready Software) maps to `accessControlEnabled`. Enabling via
-`PATCH /auth/settings/accessControlEnabled` accepts only `true` and cannot be
-undone through the public API. Treat enablement as `DISRUPTIVE`.
+**CRS** (Compliance Ready Software) maps to `accessControlEnabled`. It is 21 CFR
+Part 11 *tooling* on the robot, not a claim that the Flex is itself certified.
+Enabling via `PATCH /auth/settings/accessControlEnabled` accepts only `true`
+and cannot be undone through the public API. The App/ODD modal says the same
+(permanent). Treat enablement as `DISRUPTIVE`. Product model:
+[crs-testing.md](crs-testing.md#what-crs-is-product-model).
 
 Harness policy:
 
@@ -31,6 +34,14 @@ Harness policy:
   (creates bootstrap admin `flex_harness_admin`, provisions fixture users)
 - Prefer thorough testing with CRS **off** first ([crs-testing.md](crs-testing.md))
 - Before enable, operators must accept lockout risk and know restore paths below
+
+Live protocol on CRS-on: App/ODD **Pause** waits for a documentation note
+before the run actually pauses. That is expected. Use the door (or E-Stop).
+Do not file it as a bug.
+
+HTTP 451 on a mutation means documentation (reason) was required and missing.
+On App/ODD that is usually a frontend bug. Direct HTTP may still succeed
+without `Opentrons-User-Notes` ([RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841)).
 
 ### Restore paths when CRS is on
 

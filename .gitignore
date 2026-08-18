@@ -5,6 +5,9 @@ upstream/
 .env.*
 !.env.example
 
+# Internal product briefings (do not commit)
+Compliance Ready Software*.pdf
+
 # Python
 .venv/
 venv/

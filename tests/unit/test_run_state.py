@@ -77,6 +77,11 @@ async def test_ensure_no_current_uncurrents(tmp_path: Path) -> None:
             httpx.Response(200, json=after_payload),  # after verify
         ]
     )
+    respx.get("http://127.0.0.1:31950/runs/r1").mock(
+        return_value=httpx.Response(
+            200, json={"data": {"id": "r1", "current": True, "status": "idle"}}
+        )
+    )
     respx.patch("http://127.0.0.1:31950/runs/r1").mock(
         return_value=httpx.Response(
             200, json={"data": {"id": "r1", "current": False, "status": "stopped"}}

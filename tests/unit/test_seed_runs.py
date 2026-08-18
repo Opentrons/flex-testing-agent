@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
-from flex_testing_agent.capabilities.seed_runs import SeedId, parse_seed_ids
+from flex_testing_agent.capabilities.seed_runs import (
+    SEED_SIGNOFF_LABEL,
+    SeedId,
+    parse_seed_ids,
+    seed_signoff_label,
+)
+from flex_testing_agent.robots.flex import FlexRobot
 
 
 @pytest.mark.unit
@@ -33,3 +41,39 @@ def test_parse_seed_ids_new_pause_and_failed() -> None:
 def test_parse_seed_ids_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="Unknown seed id"):
         parse_seed_ids(["not-a-seed"])
+
+
+class _FakeSession:
+    def __init__(self, token: str | None) -> None:
+        self.access_token = token
+
+
+class _FakeSettings:
+    def __init__(self, notes: str | None) -> None:
+        self.robot_user_notes = notes
+
+
+class _FakeRobot:
+    def __init__(self, token: str | None, notes: str | None) -> None:
+        self.session = _FakeSession(token)
+        self.settings = _FakeSettings(notes)
+
+
+@pytest.mark.unit
+def test_seed_signoff_label_none_without_oauth() -> None:
+    assert seed_signoff_label(cast(FlexRobot, _FakeRobot(None, None))) is None
+
+
+@pytest.mark.unit
+def test_seed_signoff_label_default_with_oauth() -> None:
+    assert (
+        seed_signoff_label(cast(FlexRobot, _FakeRobot("token", None)))
+        == SEED_SIGNOFF_LABEL
+    )
+
+
+@pytest.mark.unit
+def test_seed_signoff_label_uses_configured_notes() -> None:
+    assert (
+        seed_signoff_label(cast(FlexRobot, _FakeRobot("token", "qa seed"))) == "qa seed"
+    )

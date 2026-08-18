@@ -225,7 +225,7 @@ not repeat. Use `0d060ba8` for non-camera/LPC spans; `3be0bdd4` for camera.
   seeds failed with HTTP 500 on `POST /protocols` after uncurrent.
 - Journal showed stale Pyro `CommunicationError` / connection reset to a dead
   `ot-protocol` port. Treat as impact of [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)
-  (related: [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790)), not as
+  (stale protocol process; [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791)), not as
   “slow upload.”
 - Spans left open at failure (often ~30–180s on `*.upload` / `*.create`) are
   **timeout / error dwell**, not successful operation latency. Exclude them from

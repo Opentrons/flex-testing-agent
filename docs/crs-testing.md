@@ -22,26 +22,192 @@ This harness treats CRS as a **dual-mode** problem:
    `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`. Catalog
    probes never call `PATCH /auth/settings/accessControlEnabled`.
 
+## What CRS is (product model)
+
+CRS is a **mode**, not a certification. It exists so a customer lab can run
+**21 CFR Part 11** style workflows on a Flex. A Flex with CRS on is **not**
+itself 21 CFR Part 11 compliant; it supplies the tools (identity, signed audit
+trail, HTTPS) for the *lab* to operate in a compliant way.
+
+Product rules that follow from that:
+
+- **Mutating HTTP** (`POST` / `PUT` / `PATCH` / `DELETE`) requires
+  identification, is written to the audit trail, and is cryptographically
+  signed. Reads (`GET`) stay open. Exception: `/clientData` is App/ODD
+  in-memory coordination, not protocols/runs/users/audit, and is **not**
+  under CRS. Unauthenticated PUT/DELETE returning 200 is expected
+  ([RQA-5918](https://opentrons.atlassian.net/browse/RQA-5918) closed,
+  no action required).
+- The compliance **user** is the authenticated workflow identity (OAuth account
+  / logged-in session), not whoever is standing at the robot. Login plus a
+  reason-for-interaction on every mutating action is intentional; App/ODD UX is
+  supposed to feel heavy.
+- You **enter** CRS with a service PIN (`{robot_serial}-0000` on current
+  builds) and **cannot exit through the public API**. The App/ODD enable modal
+  says this is permanent. Lab restore is root `opentrons_disable_crs` or
+  EXEC-2176 wipe.
+- Secure, durable logs force low-level stack changes: protocol subprocess
+  isolation ([pyro-testing.md](pyro-testing.md)), `key-server` / CAAM for TLS
+  and log signing, SSH/Jupyter off, and **no auto-delete** of CRS records.
+
+App/ODD shows a **Compliance Ready** badge on a CRS-on robot. Enable UI lives
+under Robot Settings → Advanced → “Enable Compliance Ready Software” (red
+warning that activation cannot be undone; service PIN field).
+
+### How a mutating request actually flows
+
+```text
+Frontend
+   │  POST /auth/oauth2/token  {username, password}
+   ▼
+auth-server  →  {accessToken}
+   │
+   │  POST /protocols  (or any mutation)  Authorization: Bearer …
+   ▼
+robot-server / system-server / update-server
+   │  POST /auth/oauth2/introspect
+   ▼
+auth-server  →  {valid, user, scopes}
+   │
+   │  async audit event  ("protocol uploaded by Max", …)
+   ▼
+audit-server
+```
+
+`key-server` sits beside this path. It uses hardware CAAM and
+`/var/lib/opentrons-key-server/ot-secure-volume` for **log signing** and
+**TLS certs**. The ODD **Robot Encryption Key** (typed into the App when
+trusting HTTPS) is a rotating symmetric key that proves the robot CA was not
+swapped in transit. That is a different secret from the CRS service PIN.
+
+Hubs: `auth-server` and `audit-server` talk to `robot-server`, `system-server`,
+and `update-server`. Frontend talks to that cluster over HTTP(S).
+
+### Protocol subprocess (why Pyro exists)
+
+The stack used to run as one process under `opentrons-robot-server`. CRS needs
+protocol execution **independent** of the HTTP server, so the default OS line
+splits into:
+
+| Process | Role | Privilege |
+|---------|------|-----------|
+| `opentrons-robot-server` | HTTP API, run setup, general interaction | root |
+| `opentrons-hardware-api` | Pipettes, modules, door, motion interface | root |
+| `ot-protocol` executor | Orchestrator + protocol engine for a run | `ot-protocol` user (limited) |
+
+IPC is **Pyro5** (Python Remote Objects): each service exposes a
+`PyroSynchronousObject`; callers use an `AsyncClientPyroObject` proxy.
+Serialization is explicit for anything that is not a base Python type. See
+[pyro-testing.md](pyro-testing.md).
+
+Do not run `opentrons_disable_crs` (or remount `/`) from a protocol
+subprocess. The `ot-protocol` user cannot, and product treats that as the
+wrong place even for root.
+
+### File Manager and retention
+
+CRS robots **cannot auto-delete** protocol run records / audit periods to free
+disk. Product File Manager (Desktop App and ODD Settings → “Download and
+delete robot files”) is the operator surface for:
+
+| Tab | What |
+|-----|------|
+| Audit Logs | Signed periods (protocol name, period start, period end) |
+| Diagnostic Files | Support / service dumps |
+| Protocol Run Records | Run JSON used by App/ODD UI |
+
+Flows include per-row menus, **Download all** / **Delete all**, and on ODD a
+USB picker (“Which USB device do you want to download all log periods to?”).
+Storage warnings are expected as the disk fills. This harness covers HTTP
+list/download of audit periods (`flex-test audit`) and diagnostic archives
+(`flex-test logs archive`). File Manager UI and USB export are App/ODD (out of
+scope here). Do not assume KansasFLEX CRS-on disks self-clean after suites.
+
+### Documentation required (reason for interaction)
+
+Product intent: every mutating robot action (every `POST`, and by the same
+rule `PUT`/`PATCH`/`DELETE`) shows a **Documentation Required** modal before
+the request is sent.
+
+App/ODD shape:
+
+- Note field labeled for the logged-in account (example: “Note for robot audit
+  log by testadmin”)
+- **Action list** in human language (“Toggling lights”, “Moving 0.1 mm along
+  z axis”), not raw commandType
+- Confirm stays disabled until a note is entered; **Cancel action** (or closing
+  the modal) must restore the exact prior UI state with **no visible error**
+- Login is always required for those actions
+
+**Maintenance / LPC / jog** is a UX compromise: prompt at the **start**,
+accumulate actions (`Launching labware position check`, load labware, relative
+moves), then prompt again at the **end** instead of interrupting every jog.
+
+**HTTP 451** `Unavailable for Legal Reasons` means a mutation expected
+documentation and did not get it. On App/ODD that usually means the call
+skipped `useDocumentedMutation` (frontend bug). Direct robot HTTP currently
+may still succeed without `Opentrons-User-Notes` ([RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841)).
+The harness **sends** that header on CRS-on mutations (`ROBOT_USER_NOTES`) but
+does **not** treat missing-header success as a suite pass for documentation
+enforcement.
+
+**Pause is not a bug.** In CRS mode, App/ODD Pause prompts for documentation
+and does **not** pause until the modal is submitted. Open the **door** to
+pause, or **E-Stop** in an emergency. Do not file this as an RQA bug.
+
+Human-readable action text comes from `useCommandTextString` (every
+`RunTimeCommand` needs an explicit case, present gerund, no default). New
+commands without a case break the Documentation Required list. That is
+frontend/monorepo work, not this harness.
+
 ## Goal
 
 When CRS is off, the client catalog and suite can exercise **every** Flex HTTP
 endpoint the monorepo exposes (robot-server, auth-server, update-server,
-system-server, audit-server), with risk gates. When CRS is on, the same catalog
-drives an authorization matrix without inventing ad-hoc URLs.
+system-server, audit-server, key-server), with risk gates. When CRS is on, the
+same catalog drives an authorization matrix without inventing ad-hoc URLs.
 
 **Product contract under test (API):** CRS gates **mutations**
-(POST/PATCH/PUT/DELETE). **GET** routes stay reachable with or without a token
-(except auth-server user lookups that need `users.read*`). That matches current
-robot-server / audit-server behavior on 10.0.0-alpha.1 ([RQA-5852](https://opentrons.atlassian.net/browse/RQA-5852),
-[RQA-5850](https://opentrons.atlassian.net/browse/RQA-5850)). The PRD phrase
-"login required for any action" is interpreted here as **mutating actions**, not
-reads. If product later gates GETs, update lockdown/auth-matrix expectations.
+(POST/PATCH/PUT/DELETE): login (bearer) plus audit. **GET** routes stay
+reachable with or without a token (except auth-server user lookups that need
+`users.read*`). That matches current robot-server / audit-server behavior on
+10.0.0-alpha.1 ([RQA-5852](https://opentrons.atlassian.net/browse/RQA-5852),
+[RQA-5850](https://opentrons.atlassian.net/browse/RQA-5850)) and the
+robot-server rule of thumb (GET: no login / no reason; mutations: both). The
+PRD phrase "login required for any action" is interpreted here as **mutating
+actions**, not reads. If product later gates GETs, update lockdown/auth-matrix
+expectations.
+
+Some mutations need **different scopes depending on the body** (example:
+`PATCH /runs/{runId}` for sign-off vs other fields). Auth-matrix and
+settings-suite S9 must not assume one scope for every body.
+
+### Testing implications (operators and agents)
+
+| Product behavior | What to do in this lab |
+|------------------|------------------------|
+| CRS is 21 CFR *tooling*, not Flex certification | Do not treat “KansasFLEX is Part 11 compliant” as a pass/fail |
+| Mutations need identity + audit; GETs stay open | `crs lockdown` / `auth-matrix` / `crs suite`; do not expect 401 on GETs |
+| Enable is one-way in the UI | Only `flex-test crs enable --confirm-one-way`; know disable/wipe first |
+| SSH/Jupyter off when CRS on | Serial carveout; does not turn CRS off |
+| Protocol runs in `ot-protocol` (not root) | Pyro suite on CRS-off preferred; sign-off 409 is CRS, not IPC |
+| No auto-delete of CRS records | Disk grows; File Manager is product UI; DELETE run-record still a harness gap |
+| Documentation Required on App/ODD POSTs | Out of scope for HTTP suites; send `Opentrons-User-Notes` anyway |
+| HTTP may omit reason and still succeed | Comment on [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841); do not file dupes |
+| HTTP 451 on a mutation | Likely missing documentation on a path that *does* enforce it; investigate |
+| Pause waits for a note | Expected; door or E-Stop. Do not file as a bug |
+| Cancel documentation modal | Must leave no error toast / no partial mutation |
+| Audit periods rotate on boot and protocol end | After `probe-c` / a signed-off run, `flex-test audit list` should show periods |
+| Desktop may require downloading the current period after a run | Product UX; harness can download any period id at any time |
+| Body-dependent scopes | Spot-check `PATCH /runs/{id}` signedBy vs other patches |
 
 ## Architecture
 
 ```text
-docs/crs-testing.md          design SSOT (this file)
+docs/crs-testing.md          design SSOT (this file: product model + suites)
 docs/crs-on-setup.md         CRS-on bootstrap (HTTPS, users, CLI)
+docs/robot-logs.md           audit vs diagnostic vs protocol run logs
+docs/pyro-testing.md         subprocess / Pyro (CRS isolation)
 catalog/endpoints.py         method × path inventory + risk + scopes
 clients/*                    typed HTTP wrappers (reuse RobotHttpSession)
 capabilities/probe.py        CRS-off Tier A (parameter-free GETs)
@@ -91,6 +257,7 @@ Prefer domain clients over a single mega-client:
 | OAuth token | exists | `POST /auth/oauth2/token` + introspect (`clients/oauth.py`) |
 | Users | exists | `/auth/users/*` (`clients/users.py`) |
 | Audit | exists | `GET /audit/external/logPeriods[/{id}/download]` (`flex-test audit`) |
+| Key / HTTPS CA | exists | `flex-test crs trust-ca` (Robot Encryption Key, not service PIN) |
 
 ## Run state matrix (required preflight)
 
@@ -180,8 +347,9 @@ still evolve.
 ### Service password (enter and disable CRS)
 
 On **newer internal builds** (confirm on the robot under test), the password
-used to **enter** CRS and to run **`opentrons_disable_crs`** is the robot
-**serial number** with `-0000` appended.
+used to **enter** CRS (App/ODD “Enter service PIN”) and to run
+**`opentrons_disable_crs`** is the robot **serial number** with `-0000`
+appended.
 
 Example: if `GET /health` reports `robot_serial` `FLXA2020241021003`, the CRS
 service PIN is `FLXA2020241021003-0000`.
@@ -258,7 +426,8 @@ Catalog expectations when CRS is on:
 - token with required scope on mutations → success (or resource-specific 404)
 
 Public routes: `GET /health`, `GET /server/update/health`,
-`GET /auth/settings/accessControlEnabled`, `POST /auth/oauth2/token`.
+`GET /auth/settings/accessControlEnabled`, `POST /auth/oauth2/token`,
+and all `/clientData` verbs (not under CRS; see product rules above).
 
 | Command | What it proves |
 |---------|----------------|
@@ -312,6 +481,12 @@ stay on Sara's checklist.
 | PRD: Quick Transfer disabled | App/ODD | Out of scope |
 | PRD: protocol sign-off | `settings-suite` S9 | Covered (HTTP PATCH signedBy) |
 | PRD: requireAdminCreds for update / send protocol | `settings-suite` S7 / S8 / S10 | Covered |
+| Product: 21 CFR tooling, not Flex certification | Narrative in this doc | Documented; not a suite |
+| Product: Documentation Required on App/ODD mutations | `Opentrons-User-Notes` on CRS-on HTTP; 451 vs [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841) | Partial (UI out of scope) |
+| Product: Pause waits for a documentation note | Operator note; door / E-Stop | Expected; do not file as a bug |
+| Product: File Manager / no auto-delete | `flex-test audit` + `logs archive`; USB/ODD UI out of scope | Partial |
+| Product: subprocess isolation (`ot-protocol` user) | [pyro-testing.md](pyro-testing.md) | Covered (separate suite) |
+| Product: `PATCH /runs/{id}` body-dependent scopes | `settings-suite` S9 signedBy | Partial |
 
 ## CRS-on remote-access carveout (QA)
 
@@ -408,7 +583,8 @@ Unchanged from [safety-model.md](safety-model.md):
     viewer and delete-period remain product / DISRUPTIVE.
 11. **Remaining gaps**: logout/revoke API (none in catalog); DELETE run-record
     blocked-in-CRS assertion; requireReasonForInteraction API (RQA-5841);
-    ODD/App UI (QA §3–5, §9–10).
+    ODD/App UI (QA §3–5, §9–10, Documentation Required, File Manager, USB
+    export). Do not add “pause requires a note” as a gap; that is expected.
 
 ## Related harness docs
 
@@ -419,5 +595,5 @@ Unchanged from [safety-model.md](safety-model.md):
 - [serial-console.md](serial-console.md) (FTDI; used for allow-remote-access)
 - [source-research.md](source-research.md)
 - [development-plan.md](development-plan.md)
-- [pyro-testing.md](pyro-testing.md) (orthogonal; robot may be unhealthy while this lands)
+- [pyro-testing.md](pyro-testing.md) (protocol subprocess exists so CRS can isolate runs)
 - Published plans: [test-suggestions/](test-suggestions/)

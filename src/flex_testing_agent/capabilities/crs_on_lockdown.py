@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -37,6 +38,7 @@ from flex_testing_agent.orchestration.run_state import DesiredRunState, ensure_r
 from flex_testing_agent.robots.flex import FlexRobot, build_robot_http_session
 
 BAD_BEARER_TOKEN = "flex-testing-agent.invalid-bearer-token"
+TOKEN_REFRESH_AFTER_S = 90.0
 MALFORMED_BEARER_TOKEN = "not-a-jwt"
 BAD_OAUTH_USERNAME = "flex_test_nonexistent_user"
 BAD_OAUTH_PASSWORD = "wrong-password-not-valid"
@@ -161,7 +163,7 @@ def _expectation_for_actor(spec: EndpointSpec, actor: LockdownActor) -> str | No
     if actor in {LockdownActor.BAD_BEARER, LockdownActor.MALFORMED_BEARER}:
         if spec.name == "post_oauth2_token":
             return None
-        if not is_mutation_method(spec):
+        if is_public_when_crs_on(spec) or not is_mutation_method(spec):
             return "public_ok"
         return "deny"
     if actor == LockdownActor.BAD_OAUTH:
@@ -382,6 +384,7 @@ async def run_crs_on_lockdown(
     try:
         actor_tokens, token_skipped = await _resolve_actor_tokens(settings, actors)
         result.skipped.extend(token_skipped)
+        tokens_minted_at = time.monotonic()
 
         if LockdownActor.BAD_OAUTH in actors:
             oauth_status, oauth_ok = await _probe_bad_oauth(settings)
@@ -422,6 +425,12 @@ async def run_crs_on_lockdown(
         )
 
         for spec in endpoints:
+            if time.monotonic() - tokens_minted_at >= TOKEN_REFRESH_AFTER_S:
+                actor_tokens, token_skipped = await _resolve_actor_tokens(
+                    settings, actors
+                )
+                result.skipped.extend(token_skipped)
+                tokens_minted_at = time.monotonic()
             if strict_only and not is_strict_lockdown_service(spec):
                 continue
             resolved: str | None

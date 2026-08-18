@@ -1,7 +1,9 @@
 """Client-data key/value store (``/clientData``).
 
 Source: ``robot-server/robot_server/client_data/router.py``.
-Data is cleared on robot reboot; safe for reversible CRS-off mutations.
+In-memory App/ODD coordination; cleared on robot-server reboot. Not under CRS:
+PUT/DELETE succeed with no token even when access control is on (RQA-5918,
+expected). Safe for reversible Tier C mutations.
 """
 
 from __future__ import annotations

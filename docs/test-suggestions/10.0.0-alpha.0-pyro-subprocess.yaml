@@ -3,9 +3,9 @@ title: Pyro / protocol-subprocess smoke (Flex external 10.0.0-alpha.0)
 summary: >
   Validation checklist for Pyro5 IPC on KansasFLEX after installing external
   v10.0.0-alpha.0 (same product line as former internal ot3@4.0.0-alpha.N;
-  hardware + protocol subprocess flags default on). Prefer full robot reboot
-  for recovery. Skip nameserver/service-restart experiments by default
-  (RQA-5789 / RQA-5790 Low / expected). Narrative: docs/pyro-testing.md.
+  hardware + protocol subprocess flags default on).   Prefer full robot reboot
+  for recovery. Nameserver/hardware-api grouped restart later Closed RQA-5789 /
+  RQA-5790 on v10.0.0-alpha.3 (oe-core#373 PartOf=). Narrative: docs/pyro-testing.md.
   Parent bug epic: RQA-5831.
 status: validated
 updated: "2026-08-11"
@@ -23,9 +23,9 @@ release:
     - key: RQA-5787
       title: "robot-server Application startup / nginx 502 after update while firmware flash in progress"
     - key: RQA-5789
-      title: "After nameserver restart, OT3API / robot-server-resource never re-register (Low / expected)"
+      title: "After nameserver restart, OT3API / robot-server-resource never re-register (Closed on v10.0.0-alpha.3)"
     - key: RQA-5790
-      title: "robot-server does not reattach after hardware-api restart (Low / expected)"
+      title: "robot-server does not reattach after hardware-api restart (Closed on v10.0.0-alpha.3)"
     - key: RQA-5791
       title: "Uncurrenting a run removes ot-protocol from nameserver but leaves processes running"
     - key: EXEC-2187
@@ -68,16 +68,16 @@ tests:
     name: Nameserver restart recovery
     why: Historical; producers should re-register or fail clearly.
     steps:
-      - "Skip by default (RQA-5789 Low / expected). If regressing a fix: restart opentrons-pyro-nameserver only and poll NS."
+      - "Optional regression after oe-core#373: restart opentrons-pyro-nameserver and confirm hardware-api + robot-server also bounce and OT3API re-registers."
     result: skipped
-    notes: "Dev guidance 2026-08: service-restart re-register gaps are expected; prefer full robot reboot for operator recovery."
+    notes: "Skipped on alpha.0. Later Closed on KansasFLEX v10.0.0-alpha.3 (grouped PartOf= restart; RQA-5789)."
   - id: A5
     name: Hardware-api restart reattach
     why: Historical; robot-server must refresh OT3API proxy after HW daemon URI changes.
     steps:
-      - "Skip by default (RQA-5790 Low / expected)."
+      - "Optional regression after oe-core#373: restart opentrons-hardware-api and confirm robot-server also bounces; GET /health and /instruments recover without a separate robot-server restart."
     result: skipped
-    notes: "Same as A4; full robot reboot is the documented recovery."
+    notes: "Skipped on alpha.0. Later Closed on KansasFLEX v10.0.0-alpha.3 (grouped PartOf= restart; RQA-5790)."
   - id: B1
     name: Instruments and subsystems via HTTP
     why: Lower-line IPC must serve robot-server instrument inventory.

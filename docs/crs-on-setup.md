@@ -11,7 +11,8 @@ the **CRS-on bootstrap** only.
 
 Adapted conceptually from monorepo branch `teach/auth-client-demo`
 (`e2e-testing/automation/*`). See [prior-art-review.md](prior-art-review.md) for
-what was reused vs rejected.
+what was reused vs rejected. Product model (21 CFR tooling, documentation
+required, File Manager, subprocess isolation): [crs-testing.md](crs-testing.md).
 
 | Monorepo concept | Harness location |
 |------------------|------------------|
@@ -52,8 +53,8 @@ Two different secrets (do not conflate):
 
 | Secret | Used for | On alpha.12 (KansasFLEX) |
 |--------|----------|---------------------------|
-| **Robot Encryption Key** | Decrypt `encryptedCerts` → HTTPS CA PEM | ODD rotating key (~30s periods; QA checklist ~2 min UX). **Required** for `trust-ca`. |
-| **CRS service PIN** `{serial}-0000` | Enter CRS, `opentrons_disable_crs` | Newer product behavior; **does not** decrypt HTTPS certs on alpha.12 (verified). |
+| **Robot Encryption Key** | Decrypt `encryptedCerts` → HTTPS CA PEM. `key-server` (CAAM, `/var/lib/opentrons-key-server/ot-secure-volume`) also signs audit packages with the same crypto stack. | ODD rotating key (~30s periods; QA checklist ~2 min UX). **Required** for `trust-ca`. |
+| **CRS service PIN** `{serial}-0000` | Enter CRS (App/ODD “Enter service PIN”), `opentrons_disable_crs` | Newer product behavior; **does not** decrypt HTTPS certs on alpha.12 (verified). |
 
 While CRS is **off**, fetch encrypted CA material over HTTP and decrypt with the
 **ODD Robot Encryption Key** (same flow as Opentrons App “Verify robot encryption
@@ -204,8 +205,12 @@ ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs probe-c --as-user
 
 Same reversible mutation steps as CRS-off Tier C (`flex-test crs-off-c`), with OAuth.
 Default run presence: `no-current`. Mutating requests automatically include the
-`Opentrons-User-Notes` header (CRS audit trail); override with `ROBOT_USER_NOTES`
-in `.env` or set empty to disable. Run delete / uncurrent steps sign off via
+`Opentrons-User-Notes` header (CRS audit trail / product “documentation
+required”); override with `ROBOT_USER_NOTES` in `.env` or set empty to disable.
+Do not treat HTTP success without that header as proof that App/ODD
+enforcement works ([RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841)).
+HTTP **451** means a path *did* require documentation and did not get it.
+Run delete / uncurrent steps sign off via
 `PATCH /runs/{id}` with `signedBy` when CRS requires protocol-log signoff.
 
 ### 8. CRS-on full suite (matrix + A + B + C)

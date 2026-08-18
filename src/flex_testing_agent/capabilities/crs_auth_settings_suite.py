@@ -166,10 +166,19 @@ async def run_auth_settings_suite(
         await ensure_crs_on(admin_robot)
         baseline = await admin_robot.auth_settings.get_settings()
 
+        async def refresh_suite_tokens() -> None:
+            nonlocal admin_token, operator_token, auditor_token
+            admin_token = await access_token_for_username(settings, admin_username)
+            operator_token = await access_token_for_username(
+                settings, operator_username
+            )
+            auditor_token = await access_token_for_username(settings, auditor_username)
+            admin_robot.session.set_access_token(admin_token)
+
         async def record(
             case_id: str,
             name: str,
-            coro: Awaitable[str],
+            factory: Callable[[], Awaitable[str]],
             *,
             skipped: bool = False,
         ) -> None:
@@ -184,8 +193,9 @@ async def run_auth_settings_suite(
                     )
                 )
                 return
+            await refresh_suite_tokens()
             try:
-                detail = await coro
+                detail = await factory()
                 steps.append(
                     SettingsSuiteStepResult(
                         case_id=case_id,
@@ -208,35 +218,43 @@ async def run_auth_settings_suite(
             await record(
                 "S0",
                 "preconditions_baseline",
-                _case_s0(admin_robot, baseline=baseline),
+                lambda: _case_s0(admin_robot, baseline=baseline),
             )
 
         if "S1" in selected:
             await record(
                 "S1",
                 "maxNumberOfLoginAttempts",
-                _case_s1(admin_robot, admin_token=admin_token, baseline=baseline),
+                lambda: _case_s1(
+                    admin_robot, admin_token=admin_token, baseline=baseline
+                ),
             )
 
         if "S2" in selected:
             await record(
                 "S2",
                 "passwordComplexityMinimumLength",
-                _case_s2(admin_robot, admin_token=admin_token, baseline=baseline),
+                lambda: _case_s2(
+                    admin_robot, admin_token=admin_token, baseline=baseline
+                ),
             )
 
         if "S3" in selected:
             await record(
                 "S3",
                 "passwordComplexitySpecialCharacters",
-                _case_s3(admin_robot, admin_token=admin_token, baseline=baseline),
+                lambda: _case_s3(
+                    admin_robot, admin_token=admin_token, baseline=baseline
+                ),
             )
 
         if "S4" in selected:
             await record(
                 "S4",
                 "password_complexity_combination",
-                _case_s4(admin_robot, admin_token=admin_token, baseline=baseline),
+                lambda: _case_s4(
+                    admin_robot, admin_token=admin_token, baseline=baseline
+                ),
             )
 
         if "S5" in selected:
@@ -245,7 +263,7 @@ async def run_auth_settings_suite(
                 "passwordResetTime",
                 _static_detail(
                     "blocked: requires clock control or minimum expiry",
-                )(),
+                ),
                 skipped=not include_slow,
             )
 
@@ -253,7 +271,7 @@ async def run_auth_settings_suite(
             await record(
                 "S6",
                 "idleLogout",
-                _case_s6(
+                lambda: _case_s6(
                     settings,
                     operator_token=operator_token,
                     admin_robot=admin_robot,
@@ -267,7 +285,7 @@ async def run_auth_settings_suite(
             await record(
                 "S7",
                 "requireAdminCredsWhenUpdatingRobotSoftware",
-                _case_s7(
+                lambda: _case_s7(
                     settings,
                     admin_token=admin_token,
                     operator_token=operator_token,
@@ -280,7 +298,7 @@ async def run_auth_settings_suite(
             await record(
                 "S8",
                 "requireAdminCredsWhenSendingProtocolToRobot",
-                _case_s8(
+                lambda: _case_s8(
                     settings,
                     admin_token=admin_token,
                     operator_token=operator_token,
@@ -294,7 +312,7 @@ async def run_auth_settings_suite(
             await record(
                 "S9",
                 "requireAdminCredsForSignoffProtocol",
-                _case_s9(
+                lambda: _case_s9(
                     settings,
                     admin_token=admin_token,
                     operator_token=operator_token,
@@ -308,7 +326,7 @@ async def run_auth_settings_suite(
             await record(
                 "S10",
                 "requireAdminCreds_combination_matrix",
-                _case_s10(
+                lambda: _case_s10(
                     settings,
                     admin_token=admin_token,
                     operator_token=operator_token,
@@ -322,14 +340,14 @@ async def run_auth_settings_suite(
             await record(
                 "S11",
                 "settings_persistence_and_restore",
-                _case_s11(admin_robot, baseline=baseline),
+                lambda: _case_s11(admin_robot, baseline=baseline),
             )
 
         if "S12" in selected:
             await record(
                 "S12",
                 "settings_route_authorization",
-                _case_s12(
+                lambda: _case_s12(
                     settings,
                     operator_token=operator_token,
                     auditor_token=auditor_token,

@@ -155,12 +155,19 @@ Enter / exit CRS:
 - Create `testadmin` / `testuser` yourself after enter CRS (no longer auto-created),
   or use `flex-test crs provision-users` (`flex_test_*` fixtures)
 - Disable: root SSH or serial `opentrons_disable_crs` (not a protocol subprocess)
+- Product model (21 CFR tooling, documentation required, pause-is-not-a-bug):
+  [docs/crs-testing.md](../../docs/crs-testing.md#what-crs-is-product-model)
+
+On CRS-on App/ODD: **Pause** waits for a documentation note before the run
+pauses. Expected. Open the door or E-Stop. Do not file as a bug.
 
 ## Robot logs (audit / diagnostic / protocol run)
 
 Chooser + definitions: [docs/robot-logs.md](../../docs/robot-logs.md).
 
 - **Audit** (CRS on only): signed periods; who did what / who ran a protocol
+  (includes run logs; not diagnostic). File Manager is App/ODD; CRS does not
+  auto-delete records.
 - **Diagnostic**: usual support logs (HTTP access, errors, robot-server / CAN / ODD, …)
 - **Protocol run**: command timeline for app/ODD run UI (may include source / RTP)
 
@@ -232,7 +239,8 @@ uv run flex-test serial run "systemctl is-active opentrons-robot-server"
 3. If still broken after FW idle: **full robot reboot** (power cycle or `reboot`),
    then wait for `/health` 200 again. Do **not** prescribe ordered
    `systemctl restart` of nameserver / hardware-api / robot-server as the
-   operator recovery path (those gaps are Low / expected: RQA-5789 / RQA-5790).
+   operator recovery path. Grouped `PartOf=` restart (oe-core#373) closed
+   RQA-5789 / RQA-5790 on `v10.0.0-alpha.3`; reboot is still the support path.
 
 Full validation narrative: `docs/pyro-testing.md`. Checklist YAML:
 `docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml`.
@@ -269,8 +277,9 @@ On external `10.0.0-alpha.*` (and historical internal `4.0.0-alpha.*`) builds wi
 - Store protocol/run IDs as **bare UUIDs** only (never `PROTO_ID=<uuid>` in files
   you `cat` into JSON).
 - Default checks: NS health, door, upload/analyze/create-run, uncurrent leak
-  (RQA-5791), serialization. **Skip** nameserver/hardware-api service-restart
-  experiments unless regressing a fix (see `docs/pyro-testing.md`).
+  (RQA-5791), serialization. Nameserver/hardware-api restart is optional
+  regression of grouped `PartOf=` (RQA-5789 / RQA-5790 Closed; see
+  `docs/pyro-testing.md`).
 - On-robot Serpent registry over SSH: use writable `HOME` (e.g. `/tmp/ot-home`);
   `/root/.opentrons` is often read-only.
 - Helper: `scripts/run_pyro_d_suite.sh` (full reboot if orphan processes linger).
