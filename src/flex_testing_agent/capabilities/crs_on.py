@@ -21,7 +21,7 @@ from flex_testing_agent.models.access_control import AccessControlState
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
 from flex_testing_agent.robot_certs.bootstrap import TrustCaResult, trust_robot_ca
-from flex_testing_agent.robots.flex import FlexRobot
+from flex_testing_agent.robots.flex import FlexRobot, _effective_user_notes
 
 TRUST_CA = CapabilityDescriptor(
     name="crs_trust_ca",
@@ -305,6 +305,14 @@ async def run_provision_users(
             await _admin_access_token(robot)
             if status.state == AccessControlState.ENABLED
             else None
+        )
+    # provision-users often starts with an unauthenticated FlexRobot, then mints
+    # a bearer for create_user. Session notes are only wired when the session is
+    # built with a token; without them, CRS returns HTTP 451 on POST /auth/users.
+    if token:
+        robot.session.set_access_token(token)
+        robot.session.set_user_notes(
+            _effective_user_notes(robot.settings, access_token=token)
         )
     users = UsersClient(robot.session)
     outcomes: list[ProvisionUserOutcome] = []

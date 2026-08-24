@@ -76,7 +76,7 @@ Pyro / protocol-subprocess work (`docs/pyro-testing.md`), prefer:
 | Gap | Suggested layering |
 |-----|--------------------|
 | Protocol upload / analyze / create-run / sign-off | typed clients → gated capabilities → `flex-test protocol …` |
-| Pyro / nameserver status | read-only capability (+ optional SSH later), not raw shell |
+| Pyro / nameserver status | `flex-test ssh run` or inspect; not raw `ssh`/`curl` from agents |
 | Run play / tip smoke | `PHYSICAL_MOTION` risk; only with explicit gates + operator request |
 | LPC jog latency | `flex-test lpc-jog-timing --confirm-clear-deck` (high-Z box; never toward deck) |
 
@@ -94,5 +94,6 @@ for recovery.
 - Architecture: `docs/architecture.md`
 - Safety: `docs/safety-model.md`
 - CRS dual-mode: `docs/crs-testing.md`, `docs/crs-on-setup.md`
+- Interaction layers: `docs/interaction-layers.md`
 - Versions: `docs/robot-versions.md`
 - Pyro / subprocess testing: `docs/pyro-testing.md`

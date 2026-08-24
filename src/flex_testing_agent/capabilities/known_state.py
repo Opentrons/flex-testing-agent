@@ -59,6 +59,30 @@ async def _resolve_hs_serial(robot: FlexRobot, fallback: str) -> str:
     return fallback
 
 
+async def apply_kansas_deck_configuration(
+    robot: FlexRobot,
+    *,
+    heater_shaker_serial: str | None = None,
+    timing: TimingSession | None = None,
+    span_name: str = "deck.put",
+) -> str:
+    """PUT KansasFLEX baseline deck cutouts (HS D1, trash A3).
+
+    Returns the heater-shaker serial written into the cutout. Safe to call
+    repeatedly (seed-runs applies this before each seed for independence).
+    """
+    serial = heater_shaker_serial or await _resolve_hs_serial(robot, DEFAULT_HS_SERIAL)
+    cutouts = kansas_deck_cutouts(heater_shaker_serial=serial)
+    client = DeckConfigurationClient(robot.session)
+    if timing is not None:
+        async with timing.aspan(span_name, meta={"hs_serial": serial}):
+            payload = await client.put(cutouts)
+    else:
+        payload = await client.put(cutouts)
+    robot.raw_evidence["deck_configuration"] = payload
+    return serial
+
+
 async def setup_known_state(
     robot: FlexRobot,
     *,
@@ -93,12 +117,11 @@ async def setup_known_state(
     deck_applied = False
     serial = heater_shaker_serial
     if apply_deck:
-        serial = serial or await _resolve_hs_serial(robot, DEFAULT_HS_SERIAL)
-        cutouts = kansas_deck_cutouts(heater_shaker_serial=serial)
-        client = DeckConfigurationClient(robot.session)
-        async with timing.aspan("deck.put", meta={"hs_serial": serial}):
-            payload = await client.put(cutouts)
-        robot.raw_evidence["deck_configuration"] = payload
+        serial = await apply_kansas_deck_configuration(
+            robot,
+            heater_shaker_serial=heater_shaker_serial,
+            timing=timing,
+        )
         deck_applied = True
         details.append(f"deck applied hs={serial}")
 
@@ -119,5 +142,6 @@ async def setup_known_state(
 __all__ = [
     "KNOWN_STATE_DESCRIPTOR",
     "KnownStateResult",
+    "apply_kansas_deck_configuration",
     "setup_known_state",
 ]

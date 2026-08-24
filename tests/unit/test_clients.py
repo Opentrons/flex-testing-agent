@@ -141,6 +141,18 @@ async def test_session_set_access_token_updates_header() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_session_set_user_notes() -> None:
+    session = RobotHttpSession("http://127.0.0.1:31950")
+    assert session._user_notes is None
+    session.set_user_notes("notes-after-token")
+    assert session._user_notes == "notes-after-token"
+    session.set_user_notes(None)
+    assert session._user_notes is None
+    await session.aclose()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 @respx.mock
 async def test_session_adds_user_notes_on_mutating_requests() -> None:
     notes = "flex-testing-agent test"

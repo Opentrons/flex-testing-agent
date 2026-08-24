@@ -27,6 +27,11 @@ Use only:
 If a needed call is missing, **extend the harness** (skill
 `extend-flex-harness`) instead of shelling out.
 
+**How to talk to KansasFLEX:**
+[docs/interaction-layers.md](../../docs/interaction-layers.md)
+(HTTPS when CRS on, then lab SSH, then FTDI serial). Start with
+`flex-test inspect`.
+
 | Need | Use |
 |------|-----|
 | Reachability / versions / CRS detect | `flex-test inspect` |
@@ -39,9 +44,10 @@ If a needed call is missing, **extend the harness** (skill
 | CRS-off API suite | `flex-test probe\|crs-off-b\|c\|api-suite` |
 | CRS-on API suite | `flex-test crs lockdown\|auth-matrix\|probe\|suite\|settings-suite\|users-api` |
 | CRS audit periods | `flex-test audit list\|download` |
+| Lab SSH (shell) | `flex-test ssh status\|run` |
 | Seed run history / LPC | `flex-test seed-runs` |
 | LPC jog latency (safe box) | `flex-test lpc-jog-timing --confirm-clear-deck` |
-| Boot / DHCP / SSH down | `flex-test serial …` (not HTTP) |
+| Boot / DHCP / SSH down / kernel | `flex-test serial …` (last resort; not HTTP) |
 
 ## Prerequisites
 
@@ -82,14 +88,15 @@ ALLOW_MUTATIONS=true uv run flex-test api-suite
 ALLOW_MUTATIONS=true uv run flex-test crs-off-b --create-fixtures
 ALLOW_MUTATIONS=true uv run flex-test crs-off-c
 
-# CRS-on (HTTPS + fixture users; docs/crs-on-setup.md)
-# Enable only when the operator explicitly asks (one-way API):
+# CRS-on (HTTPS is forced when access control is on; needs `crs trust-ca`)
+# Do not use plaintext :31950 for CRS-on work even if it still answers
+# (RQA-5981). Enable only when the operator explicitly asks (one-way API):
 # ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
-ROBOT_USE_HTTPS=true uv run flex-test crs lockdown --show-failures
-ROBOT_USE_HTTPS=true uv run flex-test crs auth-matrix
-ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs suite --include-lockdown
-ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
-ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
+uv run flex-test crs lockdown --show-failures
+uv run flex-test crs auth-matrix
+ALLOW_MUTATIONS=true uv run flex-test crs suite --include-lockdown
+ALLOW_MUTATIONS=true uv run flex-test crs settings-suite
+ALLOW_MUTATIONS=true uv run flex-test crs users-api
 uv run flex-test audit list
 
 # Seed succeeded/paused/failed/LPC history for Tier B (physical motion)
@@ -123,29 +130,27 @@ uv run flex-test timing
 # Design: docs/known-state-and-latency.md
 ```
 
-## FTDI serial console (no Tabby)
+## Lab SSH then FTDI serial
 
-Setup + agent rules: [docs/serial-console.md](../../docs/serial-console.md).
-Hardware photos / orientation:
+Ladder: [docs/interaction-layers.md](../../docs/interaction-layers.md).
+Hardware photos:
 [Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
 
-Prefer HTTP/`inspect`/`probe` when the network works. Use serial for boot logs,
-DHCP loss, or SSH unreachable. **Close Tabby first** (port is exclusive).
+When CRS is on, **try SSH before serial**. First-time QA carveout still needs
+serial (`allow-remote-access`); after that, `opentrons_disable_crs` and
+on-robot checks go over SSH. Kernel printk on FTDI is expected
+([docs/serial-console.md](../../docs/serial-console.md)).
 
 ```bash
+uv run flex-test ssh status
+uv run flex-test ssh run "systemctl is-active opentrons-robot-server"
+uv run flex-test serial remote-access-status   # SSH first
+# First carveout only (SSH locked out); close Tabby first:
+ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 uv run flex-test serial list
 uv run flex-test serial shell
 uv run flex-test serial watch --seconds 30
-uv run flex-test serial run "systemctl is-active opentrons-robot-server"
-uv run flex-test serial remote-access-status
-ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 ```
-
-CRS-on: `allow-remote-access` restores SSH/Jupyter/devtools via
-`/etc/opentrons-allow-remote-access` (does **not** turn CRS off; redo after OS
-update). Kernel printk on the FTDI console is expected and useful
-([docs/serial-console.md](../../docs/serial-console.md)). Details:
-[docs/crs-testing.md](../../docs/crs-testing.md).
 
 Enter / exit CRS:
 
@@ -154,9 +159,8 @@ Enter / exit CRS:
 - Password for ODD enter-CRS and for `opentrons_disable_crs`: `{robot_serial}-0000`
 - Create `testadmin` / `testuser` yourself after enter CRS (no longer auto-created),
   or use `flex-test crs provision-users` (`flex_test_*` fixtures)
-- Disable: root SSH or serial `opentrons_disable_crs` (not a protocol subprocess)
-- Product model (21 CFR tooling, documentation required, pause-is-not-a-bug):
-  [docs/crs-testing.md](../../docs/crs-testing.md#what-crs-is-product-model)
+- Disable: **SSH** `opentrons_disable_crs` when carveout is up; serial only if SSH is down
+- Product model: [docs/crs-testing.md](../../docs/crs-testing.md#what-crs-is-product-model)
 
 On CRS-on App/ODD: **Pause** waits for a documentation note before the run
 pauses. Expected. Open the door or E-Stop. Do not file as a bug.
@@ -225,18 +229,18 @@ After `put`, update-server may already show the new version while nginx `/health
 returns **502** for several minutes (firmware flash + robot-server Pyro startup).
 That is often expected; see [RQA-5787](https://opentrons.atlassian.net/browse/RQA-5787).
 
-1. Wait for `/health` 200, or SSH / serial and watch services / FW progress.
-2. SSH (lab key, not committed), or FTDI serial when DHCP/network is down:
+1. Wait for `/health` 200. Prefer **SSH** when the QA carveout or CRS-off
+   leaves port 22 open. Use FTDI serial when DHCP/network/SSH is down:
 
 ```bash
-ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST
+uv run flex-test ssh run "systemctl is-active opentrons-robot-server"
 
 # Alternative: Flex FTDI console (docs/serial-console.md; close Tabby first)
 uv run flex-test serial shell
 uv run flex-test serial run "systemctl is-active opentrons-robot-server"
 ```
 
-3. If still broken after FW idle: **full robot reboot** (power cycle or `reboot`),
+2. If still broken after FW idle: **full robot reboot** (power cycle or `reboot`),
    then wait for `/health` 200 again. Do **not** prescribe ordered
    `systemctl restart` of nameserver / hardware-api / robot-server as the
    operator recovery path. Grouped `PartOf=` restart (oe-core#373) closed

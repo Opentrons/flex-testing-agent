@@ -54,7 +54,7 @@ class UpdateUserRequest(BaseModel):
     password: str | None = None
     full_name: str | None = Field(default=None, alias="fullName")
     account_type: AccountType | None = Field(default=None, alias="accountType")
-    locked: Literal[False] | None = None
+    locked: bool | None = None
     reset_password: Literal[True] | None = Field(default=None, alias="resetPassword")
 
     def to_json_api(self) -> dict[str, Any]:

@@ -12,9 +12,10 @@ This harness talks to a **real** Flex (KansasFLEX). Follow `docs/safety-model.md
 - Mutations default **off** (`ALLOW_MUTATIONS=false`). Require explicit enablement for installs, camera enable, etc.
 - Enable access control only via `flex-test crs enable --confirm-one-way`
   (`PATCH /auth/settings/accessControlEnabled` is one-way; catalog probes never call it)
-- CRS-on QA remote-access carveout (SSH/Jupyter while CRS stays on): documented in
-  `docs/crs-testing.md`; CLI `flex-test serial allow-remote-access` requires
-  `ALLOW_MUTATIONS=true`. Does not disable CRS; EXEC-2176 wipe is separate.
+- CRS-on QA remote-access carveout (SSH/Jupyter while CRS stays on):
+  [docs/interaction-layers.md](docs/interaction-layers.md). First enable:
+  `flex-test serial allow-remote-access` (`ALLOW_MUTATIONS=true`). Then prefer
+  `flex-test ssh`. Does not disable CRS; EXEC-2176 wipe is separate.
 - Physical motion only via gated CLIs: `flex-test seed-runs` and
   `flex-test lpc-jog-timing --confirm-clear-deck` (both need `ALLOW_MUTATIONS=true`).
   Do not invent ungated home/move/jog commands or ad-hoc motion URLs.

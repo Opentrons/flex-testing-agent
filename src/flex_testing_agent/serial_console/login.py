@@ -1,4 +1,9 @@
-"""Login helpers for the Flex serial console."""
+"""Login helpers for the Flex serial console.
+
+Always classify the prompt (``probe_console_state`` / ``ensure_logged_in``)
+before running commands. Kernel printk often buries ``login:`` / the shell
+prompt; that is expected, not a harness bug. See docs/serial-console.md.
+"""
 
 from __future__ import annotations
 

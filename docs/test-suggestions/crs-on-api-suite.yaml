@@ -20,7 +20,7 @@ release:
       title: "Robot-server read endpoints return 200 without auth when access control enabled"
 hardware_required:
   - flex (CRS-enabled lab robot or dedicated lockout target)
-  - HTTPS CA trust (ROBOT_USE_HTTPS=true)
+  - HTTPS CA trust (`flex-test crs trust-ca`; harness forces HTTPS when CRS is on)
 harness:
   commands:
     - ROBOT_USE_HTTPS=true uv run flex-test inspect

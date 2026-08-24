@@ -13,6 +13,7 @@ from flex_testing_agent.cli.audit import audit_app
 from flex_testing_agent.cli.crs import crs_app
 from flex_testing_agent.cli.logs import logs_app
 from flex_testing_agent.cli.serial import serial_app
+from flex_testing_agent.cli.ssh import ssh_app
 from flex_testing_agent.config.settings import (
     Settings,
     clear_settings_cache,
@@ -20,7 +21,9 @@ from flex_testing_agent.config.settings import (
 )
 from flex_testing_agent.logging import configure_logging, get_logger
 from flex_testing_agent.orchestration.discover import (
+    CrsHttpsRequiredError,
     RobotDiscoveryError,
+    describe_crs_https_upgrade,
     settings_with_resolved_host,
 )
 from flex_testing_agent.releases.catalog import FlexReleaseCatalog
@@ -40,6 +43,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(serial_app, name="serial")
+app.add_typer(ssh_app, name="ssh")
 app.add_typer(logs_app, name="logs")
 app.add_typer(audit_app, name="audit")
 app.add_typer(crs_app, name="crs")
@@ -51,13 +55,16 @@ async def _resolve_settings_for_robot(settings: Settings) -> Settings:
     """Bind ROBOT_HOST to a live candidate (DHCP-safe)."""
     try:
         resolved = await settings_with_resolved_host(settings)
-    except RobotDiscoveryError as exc:
+    except (RobotDiscoveryError, CrsHttpsRequiredError) as exc:
         raise ValueError(str(exc)) from exc
     if resolved.robot_host != settings.robot_host:
         console.print(
             f"[yellow]ROBOT_HOST updated via discovery:[/yellow] "
             f"{settings.robot_host or '(unset)'} → {resolved.robot_host}"
         )
+    note = describe_crs_https_upgrade(settings, resolved)
+    if note:
+        console.print(f"[cyan]{note}[/cyan]")
     return resolved
 
 
@@ -150,11 +157,17 @@ def _print_inspect_summary(
     *,
     robot_name: str,
     host: str,
+    base_url: str,
     connectivity: bool,
     software_version: str | None,
     api_version: str | None,
     update_server_version: str | None,
     access_control: str,
+    api_scheme: str,
+    plaintext_http: str,
+    ssh_tcp: str,
+    ssh_auth: str,
+    recommended_shell: str,
     health_status: str,
     run_id: str,
     evidence_directory: Path | None,
@@ -164,11 +177,17 @@ def _print_inspect_summary(
     table.add_column("Value")
     table.add_row("Robot name", robot_name)
     table.add_row("Robot host", host)
+    table.add_row("API URL", base_url)
     table.add_row("Connectivity", "ok" if connectivity else "unreachable")
     table.add_row("Installed software version", software_version or "unknown")
     table.add_row("API version", api_version or "unknown")
     table.add_row("Update server version", update_server_version or "unknown")
     table.add_row("Access control", access_control)
+    table.add_row("API scheme", api_scheme)
+    table.add_row("Plaintext HTTP :31950", plaintext_http)
+    table.add_row("SSH TCP", ssh_tcp)
+    table.add_row("SSH auth", ssh_auth)
+    table.add_row("Recommended shell", recommended_shell)
     table.add_row("Health status", health_status)
     table.add_row("Run identifier", run_id)
     table.add_row(
@@ -214,18 +233,34 @@ def inspect_command(
         if snapshot.update_health is not None:
             update_server_version = snapshot.update_health.update_server_version
 
+        def _tri(value: bool | None) -> str:
+            if value is True:
+                return "yes"
+            if value is False:
+                return "no"
+            return "n/a"
+
         _print_inspect_summary(
             robot_name=snapshot.robot_display_name,
             host=snapshot.host,
+            base_url=snapshot.base_url,
             connectivity=snapshot.connectivity,
             software_version=snapshot.installed_software_version,
             api_version=snapshot.api_version,
             update_server_version=update_server_version,
             access_control=snapshot.access_control.state.value,
+            api_scheme="https" if snapshot.base_url.startswith("https://") else "http",
+            plaintext_http=_tri(snapshot.plaintext_http_reachable),
+            ssh_tcp=_tri(snapshot.ssh_tcp_reachable),
+            ssh_auth=_tri(snapshot.ssh_authenticated),
+            recommended_shell=snapshot.recommended_shell,
             health_status=health_status,
             run_id=ctx.run_id,
             evidence_directory=ctx.evidence_directory,
         )
+        if snapshot.transport_notes:
+            for note in snapshot.transport_notes:
+                console.print(f"[dim]{note}[/dim]")
         if snapshot.errors:
             console.print("[yellow]Partial errors:[/yellow]")
             for err in snapshot.errors:

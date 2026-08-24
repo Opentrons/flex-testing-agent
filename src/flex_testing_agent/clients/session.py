@@ -4,7 +4,7 @@ Designed for dual-mode access control:
 - When access control is off, omit Authorization (default inspect path).
 - When access control is on, attach an optional bearer token.
 
-HTTP by default. HTTPS after `flex-test crs trust-ca` (`ROBOT_USE_HTTPS=true`).
+HTTP when CRS is off. HTTPS when CRS is on (CA from `flex-test crs trust-ca`).
 """
 
 from __future__ import annotations
@@ -61,6 +61,10 @@ class RobotHttpSession:
             self._client.headers["Authorization"] = f"Bearer {token}"
         else:
             self._client.headers.pop("Authorization", None)
+
+    def set_user_notes(self, notes: str | None) -> None:
+        """Set CRS audit ``Opentrons-User-Notes`` for mutating requests."""
+        self._user_notes = notes
 
     async def __aenter__(self) -> RobotHttpSession:
         return self

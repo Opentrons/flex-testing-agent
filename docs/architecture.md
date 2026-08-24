@@ -43,9 +43,10 @@ Clients are independent of scenarios and agents. They raise explicit timeout/API
 ### Serial console (FTDI cable)
 
 `src/flex_testing_agent/serial_console/` talks to the Flex SOM serial header over a
-local USB FTDI adapter (not HTTP). CLI: `flex-test serial list|shell|run`. See
-[serial-console.md](serial-console.md). This sits beside HTTP clients and the
-release catalog as a lab debug transport (Tabby replacement).
+local USB FTDI adapter (not HTTP). CLI: `flex-test serial list|shell|run`. See [serial-console.md](serial-console.md)
+and the transport ladder in [interaction-layers.md](interaction-layers.md).
+This sits beside HTTP clients and the release catalog as a lab debug transport
+(Tabby replacement). Prefer `flex-test ssh` when port 22 is open.
 
 ### 2. Robot capabilities
 
@@ -112,11 +113,11 @@ When CRS is on, `RobotHttpSession` attaches an optional bearer token (ROPC via
 `/clientData` is an exception: App/ODD in-memory coordination, not under CRS
 (unauthenticated PUT/DELETE 200 is expected; RQA-5918). Enablement is one-way
 and gated: `flex-test crs enable --confirm-one-way`.
-Restore: serial **remote-access carveout** for SSH/Jupyter while CRS stays on
-(`flex-test serial allow-remote-access`), root-shell `opentrons_disable_crs`
-(password `{robot_serial}-0000`) to turn CRS off, and EXEC-2176 wipe as
-fallback. See [crs-testing.md](crs-testing.md) and
-[crs-on-setup.md](crs-on-setup.md).
+Transports (HTTPS only for CRS-on API; SSH before serial for shell):
+[interaction-layers.md](interaction-layers.md). Restore: QA remote-access
+carveout (`flex-test serial allow-remote-access` once), then SSH for
+`opentrons_disable_crs`, EXEC-2176 wipe as fallback. See
+[crs-testing.md](crs-testing.md) and [crs-on-setup.md](crs-on-setup.md).
 
 HTTP servers involved (frontend talks to this cluster):
 
@@ -139,6 +140,7 @@ Capability descriptors (`CapabilityDescriptor`) already carry name, description,
 
 ## Related operator docs
 
+- [Interaction layers](interaction-layers.md) (HTTPS vs SSH vs serial)
 - [CRS testing](crs-testing.md) (product model + dual-mode SSOT + PRD coverage)
 - [CRS-on setup](crs-on-setup.md)
 - [Pyro / protocol-subprocess testing](pyro-testing.md) (CRS isolation of runs)

@@ -30,7 +30,17 @@ tests:
     steps:
       - flex-test inspect shows access control enabled
       - flex-test crs provision-users if fixture users missing
-      - Prefer ROBOT_USE_HTTPS=true after flex-test crs trust-ca
+      - Prefer `flex-test crs trust-ca` before enable so HTTPS works immediately
+      - Harness forces HTTPS when CRS is on; lockdown fails if `:31950` still serves the API
+    result: skipped
+
+  - id: L0b
+    name: Plaintext HTTP closed
+    why: QA checklist §9; credentials and the robot API must not be served on HTTP :31950 when CRS is on.
+    steps:
+      - uv run flex-test crs lockdown --show-failures
+      - GET http://<host>:31950/health must not return an HTTP status (connection failure is a pass)
+      - POST http://<host>:31950/auth/oauth2/token must not return an HTTP status
     result: skipped
 
   - id: L1

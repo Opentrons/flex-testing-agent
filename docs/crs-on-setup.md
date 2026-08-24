@@ -68,7 +68,8 @@ ALLOW_MUTATIONS=true uv run flex-test crs trust-ca --password 'word-word-word'
 # Or import PEM from Opentrons App cert dir (macOS):
 # ~/Library/Application Support/Opentrons/certificates/
 
-# Then enable HTTPS for all harness calls
+# Then enable HTTPS for all harness calls (optional: CRS-on discovery
+# forces HTTPS when a CA PEM is already trusted)
 ROBOT_USE_HTTPS=true
 ```
 
@@ -78,13 +79,20 @@ Settings:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ROBOT_USE_HTTPS` | `false` | Use `https://host:32313` |
+| `ROBOT_USE_HTTPS` | `false` | Force HTTPS `:32313`. When CRS is on, discovery sets this true even if `.env` is false (requires `trust-ca`). |
 | `ROBOT_HTTPS_PORT` | `32313` | HTTPS port |
 | `ROBOT_CERTS_DIR` | `./artifacts/robot-certs` | PEM + registry store |
 | `ROBOT_CA_PEM` | (empty) | Override: explicit PEM path |
 | `CRS_SERVICE_PASSWORD` | (empty) | Robot Encryption Key for `trust-ca` (not `{serial}-0000`) |
 
-Discovery (`GET /health`) uses the same CA verify when `ROBOT_USE_HTTPS=true`.
+Discovery (`GET /health`) uses the same CA verify when HTTPS is in use.
+When `accessControlEnabled` is true, the harness **always** uses HTTPS. It
+will not send CRS-on credentials or API calls over plaintext `:31950`. If
+HTTP still answers while CRS is on, that is a **product leak**
+([RQA-5981](https://opentrons.atlassian.net/browse/RQA-5981)); lockdown
+records it as `plaintext_http_*` hard failures. Do not use HTTP for CRS-on
+work. Run `trust-ca` before enabling CRS so CA material exists. Ladder:
+[interaction-layers.md](interaction-layers.md).
 
 ### 2. User fixtures
 

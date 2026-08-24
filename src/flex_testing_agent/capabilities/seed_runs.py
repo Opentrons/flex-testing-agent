@@ -1,8 +1,9 @@
 """Seed a diverse protocol-run history with live motion (explicit operator request).
 
 See ``docs/known-state-and-latency.md``. Requires clear deck, trash A3, HS D1,
-and ``ALLOW_MUTATIONS=true``. Disables stall/overpressure sensing; updates
-subsystem FW when needed after OS changes.
+and ``ALLOW_MUTATIONS=true``. Applies Kansas deck configuration before each
+seed so scenarios do not depend on leftover deck config. Disables
+stall/overpressure sensing; updates subsystem FW when needed after OS changes.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from flex_testing_agent.capabilities.descriptor import CapabilityDescriptor
+from flex_testing_agent.capabilities.known_state import apply_kansas_deck_configuration
 from flex_testing_agent.clients.camera import CameraClient
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.robot_settings import (
@@ -55,7 +57,7 @@ SEED_RUNS_DESCRIPTOR = CapabilityDescriptor(
     preconditions=[
         "ALLOW_MUTATIONS=true",
         "Operator explicitly requested live motion / seed-runs",
-        "Deck clear except trash A3 and heater-shaker D1",
+        "Deck clear except trash A3 and heater-shaker D1 (config applied per seed)",
         "Free slot C2 for lpc_scripted virtual tiprack",
         "CRS on: ROBOT_USERNAME / ROBOT_PASSWORD (OAuth + protocol-log signoff)",
     ],
@@ -299,6 +301,27 @@ async def _preflight(
             await subsystems.wait_until_firmware_idle(timeout_seconds=1200.0)
         info["fw_update_waited"] = True
     return info
+
+
+async def _prepare_seed(
+    robot: FlexRobot,
+    timing: TimingSession,
+    *,
+    seed_id: str,
+) -> str:
+    """Clear current run (if any) and apply Kansas deck config for this seed."""
+    await ensure_run_state(
+        robot,
+        DesiredRunState.NO_CURRENT,
+        ensure=True,
+        capability_name="seed_runs",
+        signed_by=seed_signoff_label(robot),
+    )
+    return await apply_kansas_deck_configuration(
+        robot,
+        timing=timing,
+        span_name=f"seed.{seed_id}.deck",
+    )
 
 
 async def _run_one_seed(
@@ -572,6 +595,7 @@ async def run_seed_runs(
     for spec in specs:
         log.info("seed_start", seed_id=spec.seed_id.value)
         try:
+            await _prepare_seed(robot, timing, seed_id=spec.seed_id.value)
             outcome = await _run_one_seed(robot, spec, timing, picture_dir=picture_dir)
         except Exception as exc:
             outcome = SeedOutcome(
@@ -591,6 +615,7 @@ async def run_seed_runs(
     if run_lpc and not stopped_early:
         log.info("seed_start", seed_id=SeedId.LPC_SCRIPTED.value)
         try:
+            await _prepare_seed(robot, timing, seed_id=SeedId.LPC_SCRIPTED.value)
             outcome = await _run_lpc_seed(robot, timing)
         except Exception as exc:
             outcome = SeedOutcome(

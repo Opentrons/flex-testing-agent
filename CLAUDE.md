@@ -12,6 +12,7 @@ The harness is the product. Agent runtimes are optional adapters that should cal
 
 - [README.md](README.md) — setup, CLI, safety warnings
 - [docs/architecture.md](docs/architecture.md) — layers and extension model
+- [docs/interaction-layers.md](docs/interaction-layers.md) — HTTPS vs SSH vs serial
 - [docs/crs-testing.md](docs/crs-testing.md) — CRS product model + dual-mode SSOT
 - [docs/crs-on-setup.md](docs/crs-on-setup.md) — HTTPS, users, CRS-on CLI
 - [docs/robot-versions.md](docs/robot-versions.md) — Flex OS releases / channels
@@ -50,7 +51,7 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 
 | Capability | Entry |
 |------------|--------|
-| Inspect snapshot | `flex-test inspect` / `capabilities/inspect.py` |
+| Inspect snapshot | `flex-test inspect` / `capabilities/inspect.py` (HTTPS + SSH probe) |
 | Probe / CRS-off A+B+C | `flex-test probe\|crs-off-b\|c\|api-suite` |
 | Seed run history / LPC | `flex-test seed-runs` / `capabilities/seed_runs.py` |
 | LPC jog timing | `flex-test lpc-jog-timing --confirm-clear-deck` / `capabilities/lpc_jog_timing.py` |
@@ -60,6 +61,7 @@ See skill: `.cursor/skills/extend-flex-harness/SKILL.md`.
 | AC detect / CRS enable | `clients/auth_settings.py`; enable only via `flex-test crs enable --confirm-one-way` |
 | CRS-on suites | `flex-test crs lockdown\|auth-matrix\|probe\|suite\|settings-suite\|users-api` |
 | Audit periods | `flex-test audit list\|download` / `clients/audit.py` |
+| Lab SSH | `flex-test ssh status\|run` / `lab_ssh/` ([docs/interaction-layers.md](docs/interaction-layers.md)) |
 | FTDI serial console | `flex-test serial` / `serial_console/` ([docs/serial-console.md](docs/serial-console.md)) |
 | Diagnostic logs archive | `flex-test logs list\|archive` / `clients/logs.py` ([docs/robot-logs.md](docs/robot-logs.md)) |
 
@@ -99,18 +101,15 @@ ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
 ALLOW_MUTATIONS=true uv run flex-test put <version>
 # Internal / Pyro stack:
 ALLOW_MUTATIONS=true uv run flex-test put 10.0.0-alpha.0 --channel external
-# Internal archaeology (prefer external 10.0.0-alpha.* going forward):
-# ALLOW_MUTATIONS=true uv run flex-test put 4.0.0-alpha.10 --channel internal
-# FTDI serial console (Tabby alternative; close Tabby first if port busy):
-uv run flex-test serial list
-uv run flex-test serial shell
+uv run flex-test ssh status
+uv run flex-test ssh run "uname -a"
 uv run flex-test serial remote-access-status
 ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
-# After seed / api-suite / install verification:
 uv run flex-test logs archive
 ```
 
 Operate against the robot via skill: `.cursor/skills/operate-kansasflex/SKILL.md`.
+Interaction ladder: [docs/interaction-layers.md](docs/interaction-layers.md).
 **Never curl the robot**; use `flex-test` / clients, or extend the harness
 (`.cursor/skills/extend-flex-harness/SKILL.md`).
 Pyro validation checklist: `docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml`

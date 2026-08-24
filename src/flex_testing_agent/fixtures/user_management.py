@@ -12,6 +12,9 @@ from flex_testing_agent.models.auth_users import AccountType, UserCreateRequest
 
 EPHEMERAL_USERNAME = "flex_harness_um_crud"
 EPHEMERAL_USERNAME_RENAMED = "flex_um_crud_renamed"
+EPHEMERAL_USERNAME_SELF_TMP = "flex_um_self_tmp"
+EPHEMERAL_USERNAME_TOKEN_REV = "flex_um_tok_rev"
+EPHEMERAL_USERNAME_TOKEN_REV_REN = "flex_um_tok_ren"
 DEFAULT_EPHEMERAL_PASSWORD = "FlexHarnessUm1!"
 DEFAULT_EPHEMERAL_PASSWORD_ROTATED = "FlexHarnessUm2!"
 

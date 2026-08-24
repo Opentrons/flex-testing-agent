@@ -14,6 +14,7 @@ from flex_testing_agent.orchestration.gates import (
     MutationDeniedError,
     ensure_mutation_allowed,
 )
+from flex_testing_agent.orchestration.transports import probe_carveout_status
 from flex_testing_agent.serial_console import (
     ENABLE_REMOTE_ACCESS_SHELL,
     REMOTE_ACCESS_ALLOW_PATH,
@@ -367,34 +368,64 @@ def serial_remote_access_status(
     ),
     log_file: Path | None = _LOG_FILE_OPTION,
     save_log: bool = _SAVE_LOG_OPTION,
+    prefer_ssh: bool = typer.Option(
+        True,
+        "--ssh/--serial-only",
+        help="Try lab SSH first; open FTDI only if SSH fails (default).",
+    ),
 ) -> None:
-    """Probe CRS remote-access carveout; save transcript by default."""
+    """Probe CRS remote-access carveout (SSH first, serial fallback)."""
     settings = get_settings()
-    try:
-        resolved, rate = _resolve_port_and_baud(settings, port, baud)
-    except PortNotFoundError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise SystemExit(1) from exc
+    rate = baud if baud is not None else settings.serial_baud_rate
+    probe = None
+    serial_port: str | None = None
+    per_run = daily = None
 
-    per_run, daily = _begin_transcripts(
-        settings,
-        kind="remote-access-status",
-        port=resolved,
-        baudrate=rate,
-        log_file=log_file,
-        save_log=save_log,
-    )
-    try:
-        with SerialSession(port=resolved, baudrate=rate) as session:
-            status = probe_remote_access(session, timeout=timeout)
-    except SerialConsoleError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise SystemExit(1) from exc
+    if prefer_ssh:
+        try:
+            probe = probe_carveout_status(
+                settings,
+                serial_port=None,
+                baudrate=rate,
+                timeout=timeout,
+                prefer_ssh=True,
+            )
+        except ValueError:
+            probe = None
 
-    record_transcript(status.raw + "\n", per_run=per_run, daily=daily)
+    if probe is None:
+        try:
+            serial_port, rate = _resolve_port_and_baud(settings, port, baud)
+        except PortNotFoundError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise SystemExit(1) from exc
+        per_run, daily = _begin_transcripts(
+            settings,
+            kind="remote-access-status",
+            port=serial_port,
+            baudrate=rate,
+            log_file=log_file,
+            save_log=save_log,
+        )
+        try:
+            probe = probe_carveout_status(
+                settings,
+                serial_port=serial_port,
+                baudrate=rate,
+                timeout=timeout,
+                prefer_ssh=False,
+            )
+        except SerialConsoleError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise SystemExit(1) from exc
+
+    status = probe.status
+    if probe.transport == "serial":
+        record_transcript(status.raw + "\n", per_run=per_run, daily=daily)
 
     table = Table(title="CRS remote-access carveout", show_header=False)
-    table.add_row("Port", resolved)
+    table.add_row("Transport", probe.transport)
+    table.add_row("Serial port", serial_port or "n/a")
     table.add_row("Allow path", REMOTE_ACCESS_ALLOW_PATH)
     table.add_row("Unit", REMOTE_ACCESS_UNIT)
     allow = status.allow_file_present

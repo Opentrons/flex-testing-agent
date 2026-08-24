@@ -5,7 +5,9 @@ disable jupyter, SSH, and devtools unless a sentinel file exists on the
 read-only root filesystem. Creating that file requires an FTDI serial console
 (or equivalent root console) and is cleared on the next system update.
 
-This does **not** disable CRS. Full CRS exit still needs EXEC-2176 / wipe.
+This does **not** disable CRS. Preferred CRS exit is root
+``opentrons_disable_crs`` over SSH (or serial if SSH is down). EXEC-2176 wipe
+is the fallback. See docs/interaction-layers.md.
 """
 
 from __future__ import annotations

@@ -27,13 +27,19 @@ from flex_testing_agent.capabilities.crs_on_probe import probe_crs_on
 from flex_testing_agent.capabilities.crs_on_suite import run_crs_on_suite
 from flex_testing_agent.capabilities.crs_on_tier_b import run_crs_on_tier_b
 from flex_testing_agent.capabilities.crs_on_tier_c import run_crs_on_tier_c
+from flex_testing_agent.capabilities.idle_logout_activity import (
+    format_ping_table_rows,
+    run_idle_logout_activity,
+)
 from flex_testing_agent.capabilities.user_management_suite import (
     run_user_management_suite,
 )
 from flex_testing_agent.config.settings import Settings, get_settings
 from flex_testing_agent.fixtures.crs_users import default_crs_user_fixtures
 from flex_testing_agent.orchestration.discover import (
+    CrsHttpsRequiredError,
     RobotDiscoveryError,
+    describe_crs_https_upgrade,
     settings_with_resolved_host,
 )
 from flex_testing_agent.orchestration.run_state import (
@@ -110,10 +116,14 @@ _RUN_STATE_OPTION = typer.Option(
 async def _settings_for_robot() -> Settings:
     settings = get_settings()
     try:
-        return await settings_with_resolved_host(settings)
-    except RobotDiscoveryError as exc:
+        resolved = await settings_with_resolved_host(settings)
+    except (RobotDiscoveryError, CrsHttpsRequiredError) as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
+    note = describe_crs_https_upgrade(settings, resolved)
+    if note:
+        console.print(f"[cyan]{note}[/cyan]")
+    return resolved
 
 
 @crs_app.command("show-fixtures")
@@ -186,10 +196,6 @@ def crs_probe_cmd(
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; set true for CRS-on probes.[/yellow]"
-            )
         if not skip_users_api and not settings.allow_mutations:
             console.print(
                 "[red]Tier A user-management API requires ALLOW_MUTATIONS=true. "
@@ -262,10 +268,6 @@ def crs_probe_b_cmd(
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; set true for CRS-on probes.[/yellow]"
-            )
         desired = (
             parse_desired_run_state(run_state)
             if run_state is not None
@@ -333,10 +335,6 @@ def crs_probe_c_cmd(
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; set true for CRS-on probes.[/yellow]"
-            )
         desired = (
             parse_desired_run_state(run_state)
             if run_state is not None
@@ -396,10 +394,6 @@ def crs_suite_cmd(
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; set true for CRS-on suite.[/yellow]"
-            )
         try:
             result = await run_crs_on_suite(
                 settings,
@@ -486,10 +480,6 @@ def crs_auth_matrix_cmd() -> None:
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; set true for CRS-on matrix.[/yellow]"
-            )
         matrix = await run_auth_matrix(settings)
         table = Table(title="CRS-on auth matrix")
         table.add_column("OK")
@@ -569,11 +559,6 @@ def crs_lockdown_cmd(
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        if not settings.robot_use_https:
-            console.print(
-                "[yellow]ROBOT_USE_HTTPS is false; "
-                "set true for CRS-on lockdown.[/yellow]"
-            )
         try:
             parsed_actors = _parse_lockdown_actors(actors)
         except ValueError as exc:
@@ -687,8 +672,10 @@ def enable_crs_cmd(
         if not skip_provision and result.provision.fail_count > 0:
             return 1
         console.print(
-            "[yellow]CRS is on. Use ROBOT_USE_HTTPS=true and OAuth for API calls. "
-            "Restore: opentrons_disable_crs ({serial}-0000) or EXEC-2176 wipe.[/yellow]"
+            "[yellow]CRS is on. Later commands use HTTPS automatically when a CA "
+            "is trusted (`flex-test crs trust-ca`). OAuth is required for "
+            "mutations. Restore: opentrons_disable_crs ({serial}-0000) or "
+            "EXEC-2176 wipe.[/yellow]"
         )
         return 0
 
@@ -869,5 +856,72 @@ def settings_suite_cmd(
             f"skipped={result.skipped_count}"
         )
         return 0 if result.fail_count == 0 else 1
+
+    raise typer.Exit(asyncio.run(_run()))
+
+
+_IDLE_ACTIVITY_USER_OPTION = typer.Option(
+    "flex_test_operator",
+    "--username",
+    help="Fixture user to authenticate for the activity test.",
+)
+_IDLE_ACTIVITY_INTERVAL_OPTION = typer.Option(
+    30.0,
+    "--activity-interval",
+    help="Seconds between authenticated API calls while holding one token.",
+)
+_IDLE_ACTIVITY_MARGIN_OPTION = typer.Option(
+    30.0,
+    "--margin-seconds",
+    help="Extra seconds past idleLogout to remain active (default duration).",
+)
+_IDLE_ACTIVITY_DURATION_OPTION = typer.Option(
+    None,
+    "--duration-seconds",
+    help="Override total active duration (default: idleLogout + margin).",
+)
+
+
+@crs_app.command("idle-logout-activity")
+def idle_logout_activity_cmd(
+    username: str = _IDLE_ACTIVITY_USER_OPTION,
+    activity_interval: float = _IDLE_ACTIVITY_INTERVAL_OPTION,
+    margin_seconds: float = _IDLE_ACTIVITY_MARGIN_OPTION,
+    duration_seconds: float | None = _IDLE_ACTIVITY_DURATION_OPTION,
+) -> None:
+    """Keep one OAuth token active through idleLogout with periodic API calls."""
+
+    async def _run() -> int:
+        settings = await _settings_for_robot()
+        try:
+            result = await run_idle_logout_activity(
+                settings,
+                username=username,
+                activity_interval_seconds=activity_interval,
+                margin_seconds=margin_seconds,
+                duration_seconds=duration_seconds,
+            )
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            return 1
+
+        table = Table(title=f"idleLogout activity ({username})")
+        table.add_column("Elapsed")
+        table.add_column("Introspect active")
+        table.add_column("GET self OK")
+        table.add_column("Detail")
+        for row in format_ping_table_rows(result.pings):
+            table.add_row(*row)
+        console.print(table)
+        console.print(
+            f"idleLogout={result.idle_logout_seconds}s "
+            f"duration={result.duration_seconds}s "
+            f"interval={result.activity_interval_seconds}s"
+        )
+        if result.ok:
+            console.print(f"[green]{result.detail}[/green]")
+            return 0
+        console.print(f"[red]{result.detail}[/red]")
+        return 1
 
     raise typer.Exit(asyncio.run(_run()))

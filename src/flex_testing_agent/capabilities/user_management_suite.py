@@ -15,6 +15,9 @@ from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.fixtures.user_management import (
     DEFAULT_EPHEMERAL_PASSWORD_ROTATED,
     EPHEMERAL_USERNAME_RENAMED,
+    EPHEMERAL_USERNAME_SELF_TMP,
+    EPHEMERAL_USERNAME_TOKEN_REV,
+    EPHEMERAL_USERNAME_TOKEN_REV_REN,
     EphemeralUserSpec,
     ensure_user_absent,
     ensure_user_present,
@@ -29,14 +32,18 @@ from flex_testing_agent.robots.flex import FlexRobot
 
 _DENY_STATUSES = (401, 403)
 _REJECT_STATUSES = (400, 401, 409, 422)
+_TOKEN_REVOKED_STATUSES = (401, 403)
+_TOKEN_REVOKED_AFTER_DELETE_STATUSES = (401, 403, 404)
 
 USER_MANAGEMENT_SUITE = CapabilityDescriptor(
     name="crs_on_user_management",
     description=(
         "CRS-on auth-server user CRUD suite: POST/GET/PATCH/DELETE users, "
         "account-type change, duplicate-username reject, non-admin 403, "
-        "resetPassword (original + temp one-use), self routes, and OAuth "
-        "introspect. Idempotent setup creates a throwaway "
+        "self fullName update, self routes after username rename (RQA-5950), "
+        "admin edits that must revoke the subject's pre-issued token (RQA-5952), "
+        "resetPassword (original + temp one-use), self password rotation, and "
+        "OAuth introspect. Idempotent setup creates a throwaway "
         "flex_harness_um_crud account."
     ),
     risk_level=RiskLevel.REVERSIBLE_MUTATION,
@@ -136,6 +143,32 @@ async def run_user_management_suite(
             _setup_delete(users, spec.username, admin_token=admin_token),
         )
         await record(
+            "setup_delete_self_tmp_if_exists",
+            "DELETE",
+            f"/auth/users/byUsername/{EPHEMERAL_USERNAME_SELF_TMP}",
+            _setup_delete(users, EPHEMERAL_USERNAME_SELF_TMP, admin_token=admin_token),
+        )
+        await record(
+            "setup_delete_token_rev_if_exists",
+            "DELETE",
+            f"/auth/users/byUsername/{EPHEMERAL_USERNAME_TOKEN_REV}",
+            _setup_delete(users, EPHEMERAL_USERNAME_TOKEN_REV, admin_token=admin_token),
+        )
+        await record(
+            "setup_delete_token_rev_renamed_if_exists",
+            "DELETE",
+            f"/auth/users/byUsername/{EPHEMERAL_USERNAME_TOKEN_REV_REN}",
+            _setup_delete(
+                users, EPHEMERAL_USERNAME_TOKEN_REV_REN, admin_token=admin_token
+            ),
+        )
+        await record(
+            "setup_delete_renamed_if_exists",
+            "DELETE",
+            f"/auth/users/byUsername/{EPHEMERAL_USERNAME_RENAMED}",
+            _setup_delete(users, EPHEMERAL_USERNAME_RENAMED, admin_token=admin_token),
+        )
+        await record(
             "post_create_user",
             "POST",
             "/auth/users",
@@ -154,6 +187,79 @@ async def run_user_management_suite(
             "GET",
             "/auth/users/self",
             _get_self(users, access_token=subject_token),
+        )
+        await record(
+            "patch_self_full_name",
+            "PATCH",
+            "/auth/users/self",
+            _patch_self_full_name(
+                users,
+                access_token=subject_token,
+                full_name="Flex Harness UM CRUD Self Renamed",
+            ),
+        )
+        await record(
+            "self_routes_after_username_change",
+            "GET+PATCH",
+            "/auth/users/self",
+            _self_routes_after_username_change(
+                users,
+                oauth,
+                access_token=subject_token,
+                password=spec.password,
+                original_username=spec.username,
+                temp_username=EPHEMERAL_USERNAME_SELF_TMP,
+                full_name="Flex Harness UM After Rename",
+                restore_full_name=spec.full_name,
+            ),
+        )
+        await record(
+            "token_revoked_after_admin_edit_username",
+            "GET",
+            "/auth/users/self",
+            _token_revoked_after_admin_edit_username(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
+        )
+        await record(
+            "token_revoked_after_admin_edit_role",
+            "GET",
+            "/auth/users/self",
+            _token_revoked_after_admin_edit_role(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
+        )
+        await record(
+            "token_valid_after_admin_edit_legal_name",
+            "GET",
+            "/auth/users/self",
+            _token_valid_after_admin_edit_legal_name(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
+        )
+        await record(
+            "token_revoked_after_admin_delete_user",
+            "GET",
+            "/auth/users/self",
+            _token_revoked_after_admin_delete_user(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
+        )
+        await record(
+            "token_revoked_after_admin_lock_account",
+            "GET",
+            "/auth/users/self",
+            _token_revoked_after_admin_lock_account(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
+        )
+        await record(
+            "token_revoked_after_admin_reset_password",
+            "GET",
+            "/auth/users/self",
+            _token_revoked_after_admin_reset_password(
+                users, oauth, admin_token=admin_token, password=spec.password
+            ),
         )
         await record(
             "post_duplicate_username_rejected",
@@ -463,6 +569,280 @@ async def _patch_reset_flag(
         access_token=admin_token,
     )
     return f"resetPassword={updated.reset_password}"
+
+
+async def _patch_self_full_name(
+    users: UsersClient,
+    *,
+    access_token: str,
+    full_name: str,
+) -> str:
+    updated = await users.update_self(
+        UpdateSelfRequest(fullName=full_name),
+        access_token=access_token,
+    )
+    if updated.full_name != full_name:
+        raise AssertionError(
+            f"expected fullName={full_name!r}, got {updated.full_name!r}"
+        )
+    return f"fullName={updated.full_name}"
+
+
+async def _self_routes_after_username_change(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    access_token: str,
+    password: str,
+    original_username: str,
+    temp_username: str,
+    full_name: str,
+    restore_full_name: str,
+) -> str:
+    """After self username change, the same session must still hit /auth/users/self.
+
+    RQA-5950: pre-rename tokens currently 500 on GET and PATCH /auth/users/self.
+    Always restores ``original_username`` so later suite steps keep working.
+    """
+    await users.update_self(
+        UpdateSelfRequest(username=temp_username),
+        access_token=access_token,
+    )
+    failures: list[str] = []
+    try:
+        try:
+            await users.get_self(access_token=access_token)
+        except RobotApiError as exc:
+            failures.append(f"GET /auth/users/self HTTP {exc.status_code}")
+        try:
+            updated = await users.update_self(
+                UpdateSelfRequest(fullName=full_name),
+                access_token=access_token,
+            )
+            if updated.full_name != full_name:
+                failures.append(
+                    f"PATCH fullName expected {full_name!r}, got {updated.full_name!r}"
+                )
+        except RobotApiError as exc:
+            failures.append(f"PATCH /auth/users/self fullName HTTP {exc.status_code}")
+    finally:
+        reminted = await token_for_user(oauth, temp_username, password)
+        restored = await users.update_self(
+            UpdateSelfRequest(
+                username=original_username,
+                fullName=restore_full_name,
+            ),
+            access_token=reminted,
+        )
+        if restored.user_name != original_username:
+            raise AssertionError(
+                f"failed to restore username={original_username!r}, "
+                f"got {restored.user_name!r}"
+            )
+    if failures:
+        raise AssertionError(
+            "RQA-5950: pre-rename token must still use /auth/users/self after "
+            "username change; " + "; ".join(failures)
+        )
+    return (
+        f"same-token GET+PATCH /auth/users/self after rename ok "
+        f"(restored {original_username})"
+    )
+
+
+async def _mint_token_revocation_subject(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    spec = EphemeralUserSpec(
+        username=EPHEMERAL_USERNAME_TOKEN_REV,
+        password=password,
+        full_name="Flex Harness UM Token Rev",
+        account_type="user",
+    )
+    await ensure_user_present(users, spec, admin_token=admin_token)
+    return await token_for_user(oauth, spec.username, spec.password)
+
+
+async def _cleanup_token_revocation_users(
+    users: UsersClient,
+    *,
+    admin_token: str,
+) -> None:
+    await ensure_user_absent(
+        users, EPHEMERAL_USERNAME_TOKEN_REV, admin_token=admin_token
+    )
+    await ensure_user_absent(
+        users, EPHEMERAL_USERNAME_TOKEN_REV_REN, admin_token=admin_token
+    )
+
+
+async def _self_status(users: UsersClient, access_token: str) -> int:
+    try:
+        await users.get_self(access_token=access_token)
+    except RobotApiError as exc:
+        return exc.status_code if exc.status_code is not None else 0
+    return 200
+
+
+def _assert_token_revoked(
+    status: int, *, action: str, accepted: tuple[int, ...]
+) -> str:
+    if status in accepted:
+        return f"GET /auth/users/self HTTP {status} after admin {action}"
+    accepted_text = "/".join(str(code) for code in accepted)
+    raise AssertionError(
+        f"RQA-5952: after admin {action}, expected GET /auth/users/self "
+        f"{accepted_text} for the pre-issued token, got HTTP {status}"
+    )
+
+
+async def _token_revoked_after_admin_edit_username(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        await users.update_user(
+            EPHEMERAL_USERNAME_TOKEN_REV,
+            UpdateUserRequest(username=EPHEMERAL_USERNAME_TOKEN_REV_REN),
+            access_token=admin_token,
+        )
+        status = await _self_status(users, token)
+        return _assert_token_revoked(
+            status, action="edit username", accepted=_TOKEN_REVOKED_STATUSES
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+
+async def _token_revoked_after_admin_edit_role(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        await users.update_user(
+            EPHEMERAL_USERNAME_TOKEN_REV,
+            UpdateUserRequest(accountType="auditor"),
+            access_token=admin_token,
+        )
+        status = await _self_status(users, token)
+        return _assert_token_revoked(
+            status, action="edit role", accepted=_TOKEN_REVOKED_STATUSES
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+
+async def _token_valid_after_admin_edit_legal_name(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        await users.update_user(
+            EPHEMERAL_USERNAME_TOKEN_REV,
+            UpdateUserRequest(fullName="Flex Harness UM Legal"),
+            access_token=admin_token,
+        )
+        status = await _self_status(users, token)
+        if status == 200:
+            return "GET /auth/users/self HTTP 200 after admin edit legal name"
+        raise AssertionError(
+            "after admin edit legal name, pre-issued token must still "
+            f"GET /auth/users/self 200, got HTTP {status}"
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+
+async def _token_revoked_after_admin_delete_user(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        await users.delete_user(EPHEMERAL_USERNAME_TOKEN_REV, access_token=admin_token)
+        status = await _self_status(users, token)
+        return _assert_token_revoked(
+            status,
+            action="delete user",
+            accepted=_TOKEN_REVOKED_AFTER_DELETE_STATUSES,
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+
+async def _token_revoked_after_admin_lock_account(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        locked = await users.update_user(
+            EPHEMERAL_USERNAME_TOKEN_REV,
+            UpdateUserRequest(locked=True),
+            access_token=admin_token,
+        )
+        if not locked.locked:
+            raise AssertionError("expected locked=true after admin PATCH")
+        status = await _self_status(users, token)
+        return _assert_token_revoked(
+            status, action="lock account", accepted=_TOKEN_REVOKED_STATUSES
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+
+async def _token_revoked_after_admin_reset_password(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+) -> str:
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        await users.reset_password(
+            EPHEMERAL_USERNAME_TOKEN_REV, access_token=admin_token
+        )
+        status = await _self_status(users, token)
+        return _assert_token_revoked(
+            status, action="reset password", accepted=_TOKEN_REVOKED_STATUSES
+        )
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
 
 
 async def _patch_self_password(

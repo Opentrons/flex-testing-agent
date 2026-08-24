@@ -30,6 +30,9 @@ def _settings() -> Settings:
     return Settings(
         robot_host="192.168.0.21",
         allow_mutations=True,
+        # Isolate from lab .env CRS_ADMIN_* overrides.
+        crs_admin_username=None,
+        crs_admin_password=None,
     )
 
 

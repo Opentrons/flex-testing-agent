@@ -48,7 +48,11 @@ class Settings(BaseSettings):
     robot_https_port: int = Field(default=32313, ge=1, le=65535)
     robot_use_https: bool = Field(
         default=False,
-        description="Use HTTPS (requires CA trust). Milestone 1 defaults to HTTP.",
+        description=(
+            "Use HTTPS :32313. CRS-off defaults to HTTP. When access control "
+            "is on, discovery forces HTTPS even if this is false (requires "
+            "`flex-test crs trust-ca`)."
+        ),
     )
     robot_certs_dir: str = Field(
         default="",
@@ -119,6 +123,28 @@ class Settings(BaseSettings):
         ge=300,
         le=4_000_000,
         description="Serial console baud rate (Flex FTDI default: 115200).",
+    )
+    robot_ssh_port: int = Field(
+        default=22,
+        ge=1,
+        le=65535,
+        description="Lab SSH port (CRS-off, or CRS-on with remote-access carveout).",
+    )
+    robot_ssh_user: str = Field(
+        default="root",
+        description="Lab SSH user (typical Flex images: root).",
+    )
+    robot_ssh_identity: Path | None = Field(
+        default=None,
+        description=(
+            "Private key for lab SSH. Empty uses ~/.ssh/robot_key when that "
+            "file exists. Not committed."
+        ),
+    )
+    robot_ssh_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="SSH connect / BatchMode probe timeout.",
     )
 
     @field_validator("log_level")

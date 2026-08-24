@@ -21,6 +21,8 @@ public GitHub Pages site.
 See [SCHEMA.md](SCHEMA.md). Validated examples:
 
 - `9.1.2-module-usb-reconnect.yaml`
+- `10.0.0-alpha.4-release-delta.yaml` (three PRs since `v10.0.0-alpha.3`;
+  RQA-5913 heater-shaker livedata validated on KansasFLEX)
 - `10.0.0-alpha.1-release-delta.yaml` (install-ready checklist for fixes merged
   into `chore_release-10.0.0` since `v10.0.0-alpha.0`; parent epic RQA-5847)
 - `10.0.0-alpha.0-pyro-subprocess.yaml` (Pyro / protocol-subprocess baseline;

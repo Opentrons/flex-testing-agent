@@ -17,8 +17,9 @@ This harness treats CRS as a **dual-mode** problem:
 
 1. **CRS off** (default for KansasFLEX lab work): unauthenticated HTTP works; run
    `flex-test probe|crs-off-b|crs-off-c|api-suite`.
-2. **CRS on**: same catalog, plus OAuth, roles/scopes, 401/403 matrix, settings,
-   user CRUD, and audit download. Enablement is **gated** (not casual): only
+2. **CRS on**: HTTPS only (the harness will not use plaintext `:31950`), same
+   catalog, plus OAuth, roles/scopes, 401/403 matrix, settings, user CRUD, and
+   audit download. Enablement is **gated** (not casual): only
    `ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way`. Catalog
    probes never call `PATCH /auth/settings/accessControlEnabled`.
 
@@ -38,6 +39,11 @@ Product rules that follow from that:
   under CRS. Unauthenticated PUT/DELETE returning 200 is expected
   ([RQA-5918](https://opentrons.atlassian.net/browse/RQA-5918) closed,
   no action required).
+- **HTTPS for credentials**: QA checklist §9. With CRS on, clients must not
+  send credentials (or any robot API) over plaintext HTTP. The harness
+  enforces HTTPS. If `:31950` still serves `/health` or `/auth/oauth2/token`,
+  lockdown fails `plaintext_http_*` (product gap on alpha.4 KansasFLEX;
+  [RQA-5981](https://opentrons.atlassian.net/browse/RQA-5981) Closed Won't Do).
 - The compliance **user** is the authenticated workflow identity (OAuth account
   / logged-in session), not whoever is standing at the robot. Login plus a
   reason-for-interaction on every mutating action is intentional; App/ODD UX is
@@ -189,7 +195,7 @@ settings-suite S9 must not assume one scope for every body.
 | CRS is 21 CFR *tooling*, not Flex certification | Do not treat “KansasFLEX is Part 11 compliant” as a pass/fail |
 | Mutations need identity + audit; GETs stay open | `crs lockdown` / `auth-matrix` / `crs suite`; do not expect 401 on GETs |
 | Enable is one-way in the UI | Only `flex-test crs enable --confirm-one-way`; know disable/wipe first |
-| SSH/Jupyter off when CRS on | Serial carveout; does not turn CRS off |
+| SSH/Jupyter off when CRS on | Serial carveout once, then SSH; does not turn CRS off |
 | Protocol runs in `ot-protocol` (not root) | Pyro suite on CRS-off preferred; sign-off 409 is CRS, not IPC |
 | No auto-delete of CRS records | Disk grows; File Manager is product UI; DELETE run-record still a harness gap |
 | Documentation Required on App/ODD POSTs | Out of scope for HTTP suites; send `Opentrons-User-Notes` anyway |
@@ -204,6 +210,7 @@ settings-suite S9 must not assume one scope for every body.
 ## Architecture
 
 ```text
+docs/interaction-layers.md   HTTPS vs SSH vs serial (operator/agent ladder)
 docs/crs-testing.md          design SSOT (this file: product model + suites)
 docs/crs-on-setup.md         CRS-on bootstrap (HTTPS, users, CLI)
 docs/robot-logs.md           audit vs diagnostic vs protocol run logs
@@ -391,7 +398,9 @@ opentrons_disable_crs
 
 Requirements:
 
-- Run as **root** over **SSH** or **FTDI serial** ([serial-console.md](serial-console.md))
+- Run as **root** over **SSH** (preferred when the QA carveout is on) or
+  **FTDI serial** ([serial-console.md](serial-console.md);
+  [interaction-layers.md](interaction-layers.md))
 - Enter the same service password as enter-CRS: `{robot_serial}-0000`
 - Do **not** invoke this as a protocol subprocess / in-protocol shell call; use
   an interactive (or scripted) root shell only
@@ -472,11 +481,11 @@ stay on Sara's checklist.
 | §7 First-login prompt without password | App/ODD | Out of scope |
 | §8 Settings tunables | `crs settings-suite` S0–S12 / [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml) | Covered (S5 often blocked) |
 | §8 requireReasonForInteraction | Audit settings; [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841) | Known API bypass; not asserted as pass |
-| §9 HTTPS for credentials | `ROBOT_USE_HTTPS=true` after `trust-ca` | Partial (App/ODD token storage out of scope) |
+| §9 HTTPS for credentials | Discovery forces HTTPS when CRS is on; lockdown `plaintext_http_*` (HTTP `:31950` must not serve the API) | Harness enforced; product still served HTTP on KansasFLEX `v10.0.0-alpha.4` ([RQA-5981](https://opentrons.atlassian.net/browse/RQA-5981) Closed Won't Do). Do not use HTTP for CRS-on API work. |
 | §10 Frontend UI state | App/ODD | Out of scope |
 | §11 Audit logs | `flex-test audit list\|download` / [crs-audit-logs.yaml](test-suggestions/crs-audit-logs.yaml) | List/download covered; hash-chain viewer is product |
 | §12 Test DB migration | Release engineering | Out of scope |
-| PRD: SSH/Jupyter off when CRS on | `flex-test serial remote-access-status` | Covered (status); carveout is lab-only |
+| PRD: SSH/Jupyter off when CRS on | `flex-test ssh status`; `flex-test serial remote-access-status` (SSH first) | Covered (status); carveout is lab-only |
 | PRD: delete protocol run record removed in CRS | Not a dedicated suite step | Gap (spot-check DELETE `/runs/{id}` vs product) |
 | PRD: Quick Transfer disabled | App/ODD | Out of scope |
 | PRD: protocol sign-off | `settings-suite` S9 | Covered (HTTP PATCH signedBy) |
@@ -508,6 +517,7 @@ Why this is a safe lab carveout:
 3. Root-owned; protocol code cannot alter it.
 4. Remounting root RW is an explicit root hoop (serial console).
 5. Starts disabled; first enable needs serial (SSH is already locked out).
+   After that, prefer `flex-test ssh` over serial ([interaction-layers.md](interaction-layers.md)).
 
 Auth-server gate: “is CRS on?” is answered by the auth server. If auth does not
 respond correctly, remote access **fails closed** (no SSH/Jupyter). Jupyter/SSH
@@ -536,19 +546,21 @@ after every robot OS update.
 ### Harness CLI
 
 ```bash
-# Close Tabby first (exclusive serial port)
-uv run flex-test serial remote-access-status
+uv run flex-test ssh status
+uv run flex-test serial remote-access-status   # SSH first, serial if SSH fails
+# Close Tabby first (exclusive serial port) for first-time carveout:
 ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 ```
 
 `allow-remote-access` is `DISRUPTIVE` (remounts `/` RW) and requires
-`ALLOW_MUTATIONS=true`. Prefer HTTP when network + CRS-off still work.
+`ALLOW_MUTATIONS=true`. Use it only when SSH is locked out. After the
+sentinel exists, use SSH for shell work.
 
 ### Not the same as disable / wipe
 
 | Goal | Path |
 |------|------|
-| Keep CRS on, restore lab SSH/Jupyter/devtools | Serial allow-file carveout (this section) |
+| Keep CRS on, restore lab SSH/Jupyter/devtools | Serial allow-file carveout (this section), then SSH |
 | Turn CRS **off** again (preferred lab path) | Root shell: `opentrons_disable_crs` with `{serial}-0000` (see Enter / exit CRS) |
 | Turn CRS **off** when disable binary unavailable | EXEC-2176 / assisted wipe (not this harness) |
 
@@ -588,6 +600,7 @@ Unchanged from [safety-model.md](safety-model.md):
 
 ## Related harness docs
 
+- [interaction-layers.md](interaction-layers.md)
 - [crs-on-setup.md](crs-on-setup.md)
 - [architecture.md](architecture.md) (dual-mode AC note)
 - [safety-model.md](safety-model.md)

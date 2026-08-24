@@ -33,7 +33,7 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Flex facade | `robots/flex.py` |
 | Gates | `orchestration/gates.py` |
 | LPC jog timing | `capabilities/lpc_jog_timing.py`, `flex-test lpc-jog-timing` |
-| Docs | `docs/architecture.md`, `docs/safety-model.md`, `docs/crs-testing.md`, `docs/crs-on-setup.md`, `docs/pyro-testing.md`, `docs/serial-console.md`, `docs/robot-logs.md`, `docs/known-state-and-latency.md` |
+| Docs | `docs/architecture.md`, `docs/interaction-layers.md`, `docs/safety-model.md`, `docs/crs-testing.md`, `docs/crs-on-setup.md`, `docs/pyro-testing.md`, `docs/serial-console.md`, `docs/robot-logs.md`, `docs/known-state-and-latency.md` |
 | Pyro test plan | `docs/test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml` |
 | Pyro narrative | `docs/pyro-testing.md` (external `10.0.0-alpha.N` = former internal `4.0.0-alpha.N`) |
 | Bug epic | [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831) |
@@ -61,6 +61,7 @@ uv run flex-test inspect|status|wait-health|probe|releases|put <version>
 uv run flex-test seed-runs|lpc-jog-timing
 uv run flex-test crs lockdown|auth-matrix|probe|suite|settings-suite|users-api
 uv run flex-test audit list|download
-uv run flex-test serial list|shell|run   # FTDI console; docs/serial-console.md
+uv run flex-test ssh status|run          # lab SSH; docs/interaction-layers.md
+uv run flex-test serial list|shell|run   # FTDI last resort; docs/serial-console.md
 uv run flex-test logs list|archive       # diagnostic logs; docs/robot-logs.md
 ```

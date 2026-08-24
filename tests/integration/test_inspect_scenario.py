@@ -9,10 +9,29 @@ import pytest
 import respx
 
 from flex_testing_agent.config.settings import Settings
+from flex_testing_agent.lab_ssh.probe import LabSshStatus
 from flex_testing_agent.models.access_control import AccessControlState
 from flex_testing_agent.models.run import RunStatus
 from flex_testing_agent.persistence.store import bootstrap_store
 from flex_testing_agent.scenarios.runner import run_inspect_scenario
+
+
+@pytest.fixture
+def _no_lab_ssh(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _ssh(_settings: Settings) -> LabSshStatus:
+        return LabSshStatus(
+            host="127.0.0.1",
+            port=22,
+            tcp_reachable=False,
+            authenticated=None,
+            identity_path=None,
+            detail="unit test: SSH not probed",
+        )
+
+    monkeypatch.setattr(
+        "flex_testing_agent.orchestration.transports.probe_lab_ssh",
+        _ssh,
+    )
 
 
 @pytest.mark.integration
@@ -22,6 +41,7 @@ async def test_inspect_scenario_happy_path(
     settings: Settings,
     sample_health_payload: dict[str, object],
     sample_update_health_payload: dict[str, object],
+    _no_lab_ssh: None,
 ) -> None:
     respx.get("http://127.0.0.1:31950/health").mock(
         return_value=httpx.Response(200, json=sample_health_payload)
@@ -44,6 +64,7 @@ async def test_inspect_scenario_happy_path(
         assert metadata.name == "inspect-robot"
         assert snapshot.connectivity is True
         assert snapshot.access_control.state == AccessControlState.DISABLED
+        assert snapshot.recommended_shell == "serial"
         assert ctx.status == RunStatus.SUCCEEDED
         assert ctx.evidence_directory is not None
         assert (ctx.evidence_directory / "snapshot.json").is_file()
@@ -62,6 +83,7 @@ async def test_inspect_reports_unknown_access_control_on_failure(
     settings: Settings,
     sample_health_payload: dict[str, object],
     sample_update_health_payload: dict[str, object],
+    _no_lab_ssh: None,
 ) -> None:
     respx.get("http://127.0.0.1:31950/health").mock(
         return_value=httpx.Response(200, json=sample_health_payload)

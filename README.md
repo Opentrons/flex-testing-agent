@@ -52,7 +52,8 @@ Typed robot clients
 Flex robot APIs and services
 ```
 
-See [docs/architecture.md](docs/architecture.md).
+See [docs/architecture.md](docs/architecture.md). How operators/agents choose
+HTTPS vs SSH vs serial: [docs/interaction-layers.md](docs/interaction-layers.md).
 
 ## Setup
 
@@ -129,7 +130,10 @@ ALLOW_MUTATIONS=true uv run flex-test lpc-jog-timing --confirm-clear-deck
 ## CRS-on API suite
 
 Requires access control enabled, HTTPS CA trust, and fixture users. See
-[docs/crs-on-setup.md](docs/crs-on-setup.md) and [docs/crs-testing.md](docs/crs-testing.md).
+[docs/crs-on-setup.md](docs/crs-on-setup.md), [docs/crs-testing.md](docs/crs-testing.md),
+and the transport ladder in [docs/interaction-layers.md](docs/interaction-layers.md).
+CRS-on API calls use HTTPS `:32313` only (plaintext `:31950` may still answer;
+do not use it).
 
 ```bash
 ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
@@ -173,24 +177,20 @@ When CRS (access control) is enabled, set `ROBOT_USERNAME` / `ROBOT_PASSWORD` so
 
 On Pyro builds (`10.0.0-alpha.*`), `/health` may return nginx **502** for several minutes after commit while firmware flashes and robot-server attaches to the nameserver. Prefer **full robot reboot** if still unhealthy after firmware is idle. See [docs/pyro-testing.md](docs/pyro-testing.md).
 
-## FTDI serial console (no Tabby)
+## Lab SSH and FTDI serial
 
-Harness setup + agent rules: [docs/serial-console.md](docs/serial-console.md).
-Hardware photos / cable orientation:
+How to pick HTTPS vs SSH vs serial: [docs/interaction-layers.md](docs/interaction-layers.md).
+Serial hardware: [docs/serial-console.md](docs/serial-console.md).
 [Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
 
 ```bash
-uv run flex-test serial list
-uv run flex-test serial shell          # close Tabby first (port is exclusive)
-uv run flex-test serial run "systemctl is-active opentrons-robot-server"
+uv run flex-test ssh status
+uv run flex-test ssh run "systemctl is-active opentrons-robot-server"
 uv run flex-test serial remote-access-status
 ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
+uv run flex-test serial list
+uv run flex-test serial shell
 ```
-
-Defaults: **115200** baud, auto-detect FTDI / `usbserial`, prefer `/dev/cu.*` on macOS.
-CRS-on QA carveout (SSH/Jupyter while CRS stays on): [docs/crs-testing.md](docs/crs-testing.md).
-Setup: [docs/serial-console.md](docs/serial-console.md) and the
-[Confluence FTDI guide](https://opentrons.atlassian.net/wiki/spaces/RPDO/pages/5663293442/Using+an+FTDI+cable+to+access+a+Flex).
 
 ## Robot logs
 
@@ -229,7 +229,7 @@ See [docs/safety-model.md](docs/safety-model.md). For internal Pyro / protocol-s
 
 ## Current limitations
 
-- HTTP by default; HTTPS after `flex-test crs trust-ca` (`ROBOT_USE_HTTPS=true`)
+- HTTP when CRS is off; HTTPS when CRS is on (forced after `flex-test crs trust-ca`)
 - Access-control dual-mode is implemented (optional bearer token + CRS-on suites)
 - Lockdown smoke scenario YAML is a historical placeholder; use `flex-test crs lockdown`
 - Agent session / tool / token tables exist but are unused
@@ -256,6 +256,7 @@ Authoring guide: [docs/test-suggestions/README.md](docs/test-suggestions/README.
 ## Docs
 
 - [Architecture](docs/architecture.md)
+- [Interaction layers](docs/interaction-layers.md) (HTTPS vs SSH vs serial)
 - [Robot versions and releases](docs/robot-versions.md)
 - [Pyro / protocol-subprocess testing](docs/pyro-testing.md)
 - [Monorepo release pattern](docs/monorepo-releases.md) (`opentrons/opentrons` / `chore_release-*`)

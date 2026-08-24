@@ -61,6 +61,25 @@ ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access
 
 Interactive exit: **Ctrl+]** then **q**. Menu: **Ctrl+T**.
 
+## Session contract (assess the prompt)
+
+The Flex serial console is also the kernel debug device. Unsolicited printk
+will appear **while you are logging in** and **while commands run**. That is
+not a harness bug.
+
+On every connect, the harness:
+
+1. Hits Enter and classifies the stream as `login` / `password` / `shell` /
+   `unknown` (`probe_console_state`). Kernel lines often bury the prompt;
+   it retries.
+2. Auto-logs in as `root` when at `login:` (`ensure_logged_in`).
+3. Runs scripted commands between echo markers. Command **output** drops
+   printk lines; `kernel_lines` and the transcript keep them.
+
+Do not treat interleaved kernel logs as a failed login. Do not invent
+`screen` / `cu` / `minicom` one-offs. Prefer SSH when it is up
+([interaction-layers.md](interaction-layers.md)).
+
 ## Kernel logging (expected and useful)
 
 Per the
@@ -107,20 +126,26 @@ and hardware issues; do not strip them from saved files.
 
 | Do | Do not |
 |----|--------|
-| Prefer HTTP / `flex-test inspect\|probe\|…` when the network is up | Invent ad-hoc `screen`/`cu`/`minicom` one-offs |
-| Use `serial list` then `serial run` / `serial shell` / `serial watch` for boot, DHCP loss, or SSH unreachable | Discard kernel printk as “noise” when debugging boot/USB |
+| Prefer HTTPS/`flex-test inspect\|probe\|…` when the network is up; CRS-on API is HTTPS only | Invent ad-hoc `screen`/`cu`/`minicom` or `curl` |
+| Prefer `flex-test ssh` for shell when port 22 authenticates | Open FTDI first while SSH works |
+| Use `serial list` then `serial run` / `shell` / `watch` for boot, DHCP loss, first carveout, or SSH down | Discard kernel printk as “noise” when debugging boot/USB |
+| Let `ensure_logged_in` classify the prompt; keep transcripts | Treat printk between `login:` and the shell as a bug |
 | Use `serial allow-remote-access` only with `ALLOW_MUTATIONS` when CRS locked out SSH | Assume allow-remote-access **disables** CRS (it does not) |
-| Prefer root-shell `opentrons_disable_crs` (+ `{serial}-0000`) to exit CRS when available | Run `opentrons_disable_crs` from a protocol subprocess (`ot-protocol` user cannot; wrong place even as root) |
+| Prefer SSH `opentrons_disable_crs` (+ `{serial}-0000`) to exit CRS when SSH is up | Run `opentrons_disable_crs` from a protocol subprocess |
 | Close competing serial apps if open fails busy | Encode EXEC-2176 wipe / motion as ad-hoc serial one-liners |
 | Read this doc + Confluence before first cable plug | Guess header orientation |
 
 Python API: `flex_testing_agent.serial_console`
 (`resolve_serial_port`, `open_interactive_shell`, `SerialSession`, `run_command`,
 `run_command_result`, `watch_console`, `partition_console_text`,
+`probe_console_state`, `ensure_logged_in`,
 `enable_remote_access`, `probe_remote_access`).
+
+Lab SSH: `flex-test ssh` / `flex_testing_agent.lab_ssh`.
 
 ## Related
 
+- [Interaction layers](interaction-layers.md)
 - [Robot logs](robot-logs.md) (audit / diagnostic / protocol run; not the same as FTDI tees)
 - [CRS testing](crs-testing.md) (enter/exit CRS, remote-access carveout, disable vs wipe, product model)
 - [Pyro testing](pyro-testing.md) (SSH/serial when post-install `/health` is 502)

@@ -16,7 +16,9 @@ from flex_testing_agent.config.settings import (
 )
 from flex_testing_agent.logging import configure_logging
 from flex_testing_agent.orchestration.discover import (
+    CrsHttpsRequiredError,
     RobotDiscoveryError,
+    describe_crs_https_upgrade,
     settings_with_resolved_host,
 )
 
@@ -46,13 +48,16 @@ _IDENTIFIER_OPTION = typer.Option(
 async def _resolve_settings_for_robot(settings: Settings) -> Settings:
     try:
         resolved = await settings_with_resolved_host(settings)
-    except RobotDiscoveryError as exc:
+    except (RobotDiscoveryError, CrsHttpsRequiredError) as exc:
         raise ValueError(str(exc)) from exc
     if resolved.robot_host != settings.robot_host:
         console.print(
             f"[yellow]ROBOT_HOST updated via discovery:[/yellow] "
             f"{settings.robot_host or '(unset)'} → {resolved.robot_host}"
         )
+    note = describe_crs_https_upgrade(settings, resolved)
+    if note:
+        console.print(f"[cyan]{note}[/cyan]")
     return resolved
 
 

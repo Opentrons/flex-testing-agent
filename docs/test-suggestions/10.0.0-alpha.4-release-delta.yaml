@@ -1,0 +1,118 @@
+id: 10.0.0-alpha.4-release-delta
+title: Flex 10.0.0-alpha.4 release-delta validation (chore_release-10.0.0 since alpha.3)
+summary: >
+  Three monorepo commits on chore_release-10.0.0 between v10.0.0-alpha.3 and
+  v10.0.0-alpha.4 (PRs #22275, #22282, #22284). oe-core has no delta between
+  those tags. KansasFLEX is on v10.0.0-alpha.4. Close RQA-5913 after the
+  heater-shaker livedata check; App-only RQA-5900 and RQA-5895 still need a
+  Desktop App pass before close.
+status: suggested
+updated: "2026-08-19"
+release:
+  monorepo_branch: chore_release-10.0.0
+  compared_to_tag: v10.0.0-alpha.3
+  robot_os: 10.0.0-alpha.4
+  tickets:
+    - key: RQA-5484
+      title: "10.0.0 Bugs"
+    - key: RQA-5913
+      title: "Pyro livedata StrEnums break nested module live data serialization"
+    - key: RQA-5900
+      title: "Download audit logs copy implies logs are deleted without operator action"
+    - key: RQA-5895
+      title: "Desktop App shows a transport error after a successful Flex auto-commit update"
+  prs:
+    - number: 22282
+      title: "fix(api): replace enums in livedata with strings"
+      url: https://github.com/Opentrons/opentrons/pull/22282
+    - number: 22275
+      title: "refactor(app): change download audit log text"
+      url: https://github.com/Opentrons/opentrons/pull/22275
+    - number: 22284
+      title: "fix(app): trust robot status over HTTP errors during auto-commit updates"
+      url: https://github.com/Opentrons/opentrons/pull/22284
+hardware_required:
+  - flex (KansasFLEX on v10.0.0-alpha.4)
+  - heaterShakerModuleV1 (or temp / TC / vacuum for extra livedata coverage)
+  - Desktop App built from chore_release-10.0.0 at or after #22284 (App tickets)
+harness:
+  commands:
+    - uv run flex-test inspect
+    - uv run flex-test status
+    - uv run flex-test probe --no-picture
+tests:
+  - id: I0
+    name: Confirm KansasFLEX is on v10.0.0-alpha.4
+    why: Robot OS tag is the gate for the API livedata fix.
+    steps:
+      - "uv run flex-test inspect → Installed software version v10.0.0-alpha.4, API 10.0.0-alpha.4."
+      - "oe-core v10.0.0-alpha.3..v10.0.0-alpha.4 is empty (retag only)."
+    result: pass
+    notes: "2026-08-19 KansasFLEX 192.168.0.21; CRS on; health 200."
+
+  - id: F1
+    name: Heater-shaker livedata is JSON-native strings (RQA-5913 / #22282)
+    why: >
+      Nested StrEnums in module live data failed Pyro serialization. The fix
+      stores .value strings (status, latch, speed, temperature).
+    steps:
+      - "GET /modules (flex-test probe or FlexRobot.session.get_json)."
+      - "Heater-shaker data.status / labwareLatchStatus / speedStatus / temperatureStatus are plain JSON strings, not enum objects."
+      - "Request does not 500 on nested live data."
+    result: pass
+    notes: >
+      2026-08-19 HSDVT22041138 heaterShakerModuleType: status=idle,
+      labwareLatchStatus=idle_open, speedStatus=idle, temperatureStatus=idle,
+      currentSpeed=0, currentTemperature=25.85. Evidence also on Jira comment.
+      Ready to close RQA-5913 (transition not applied from this session).
+
+  - id: F1b
+    name: diskDetails runStartLimit matches gate (RQA-5848 regression)
+    why: Closed alpha.1 field/gate mismatch; confirm alpha.4 still reports 2048.
+    steps:
+      - "GET /health → disk_details.runStartLimitFreeSpaceMb == 2048"
+      - "isDiskSpaceBelowRunStartLimit false at ~3.5GB free"
+    result: pass
+    notes: "2026-08-19 KansasFLEX: runStartLimitFreeSpaceMb=2048.0, available≈3494MB."
+
+  - id: F1c
+    name: Uncurrent run retains commands over HTTP + audit zip (RQA-5843)
+    why: Pyro clear used to stub empty commands; Ready-for-QA ticket.
+    steps:
+      - "GET /runs/{id} for a succeeded uncurrent run"
+      - "GET /runs/{id}/commands non-empty"
+      - "Map logPeriodId; flex-test audit download <id>; unzip run JSON commands.data"
+    result: pass
+    notes: >
+      2026-08-19: run 91784348… logPeriodId=39 → audit zip has 9 commands
+      (home/loadPipette/comment/…). Period 41 has 19 commands. Empty audit
+      commands only when HTTP also had 0 (stopped before play). Ready to close.
+
+  - id: F2
+    name: Download audit logs copy (RQA-5900 / #22275)
+    why: App/ODD modal no longer says logs are unsaved and unrecoverable.
+    steps:
+      - "Desktop App on a CRS-on robot: trigger Download audit logs."
+      - "Body is 'Once a protocol run is complete, audit logs must be downloaded locally before continuing.'"
+      - "Primary button is 'Download now' (not the old heading text)."
+      - "Does not claim data cannot be recovered after the session ends."
+    result: skipped
+    notes: "App-only. Ships in Desktop App, not robot HTTP. Confirm then close RQA-5900."
+
+  - id: F3
+    name: Auto-commit update no false transport error (RQA-5895 / #22284)
+    why: App used to treat HTTP drops during auto-commit/reboot as failure.
+    steps:
+      - "Use a Desktop App build that includes #22284."
+      - "Run a Flex software update (zip or banner) on CRS and non-CRS if possible."
+      - "Expect the App to keep polling / rediscover; success when the robot is on the target version."
+      - "Fail only if the robot reports an error, never left awaiting-file, or comes back on the wrong version."
+    result: skipped
+    notes: >
+      App-only. PR test plan already checked zip updates on CRS and non-CRS;
+      banner path still unchecked on the PR. Do not close from robot OS alone.
+notes: >
+  Validated 2026-08-19 on KansasFLEX v10.0.0-alpha.4. Atlassian MCP was not
+  available in this session, so Jira was not transitioned. Close RQA-5913 with
+  the F1 GET /modules evidence. Close RQA-5900 and RQA-5895 only after App
+  confirmation.

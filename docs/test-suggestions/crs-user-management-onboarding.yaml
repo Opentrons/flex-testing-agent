@@ -2,11 +2,11 @@ id: crs-user-management-onboarding
 title: CRS user management, password reset, and login API
 summary: >
   Exercise auth-server user CRUD, role change, non-admin 403, duplicate username,
-  admin password reset, and temporary-password one-use via HTTP. Maps QA checklist
-  sections 3, 6, and 7 (API only; ODD/App UI is out of scope). File product bugs
-  under RQA-5847.
+  self fullName update, admin password reset, and temporary-password one-use via
+  HTTP. Maps QA checklist sections 3, 6, and 7 (API only; ODD/App UI is out of
+  scope). File product bugs under RQA-5847.
 status: draft
-updated: "2026-08-12"
+updated: "2026-08-20"
 release:
   monorepo_branch: chore_release-10.0.0
   compared_to_tag: null
@@ -14,6 +14,10 @@ release:
   tickets:
     - key: RQA-5847
       title: "10.0.0-alpha.1 Bugs"
+    - key: RQA-5950
+      title: "Self username change leaves the existing session unable to use /auth/users/self"
+    - key: RQA-5952
+      title: "Locking a user account does not revoke previously issued access tokens"
 hardware_required:
   - flex (CRS-enabled)
   - HTTPS CA trust (ROBOT_USE_HTTPS=true)
@@ -61,6 +65,50 @@ tests:
       - Covered by users-api operator_patch_forbidden and operator_delete_forbidden
     result: skipped
 
+  - id: U4b
+    name: User can update own fullName
+    why: QA checklist §6 / self profile; PATCH /auth/users/self with only fullName.
+    steps:
+      - Covered by users-api step patch_self_full_name (subject token, fullName only)
+      - Live confirmed 2026-08-19 on KansasFLEX alpha.4 with flex_test_operator
+    result: pass
+
+  - id: U4c
+    name: Existing session still works for /auth/users/self after username change (RQA-5950)
+    why: >
+      After PATCH /auth/users/self username, the same access token must still
+      GET and PATCH /auth/users/self. Pre-rename tokens currently 500 (RQA-5950).
+    steps:
+      - Covered by users-api step self_routes_after_username_change
+      - Rename self → same-token GET self + PATCH fullName → remint → restore
+      - Expect 200 on both same-token self routes (fails while RQA-5950 is open)
+    result: fail
+    notes: >
+      2026-08-19 KansasFLEX alpha.4: after rename, same token GET/PATCH
+      /auth/users/self → 500 because the token subject is frozen at the old
+      username; introspect still reports active with the old name. A fresh token
+      for the new username works. Likely fix: refresh the session on username
+      change, or resolve self by stable user id.
+
+  - id: U8
+    name: Admin actions revoke the target user's existing token (RQA-5952)
+    why: >
+      An administrator lock/delete/reset/role/username change on another user
+      must immediately reject that user's previously issued access token.
+      Changing only Legal name must leave the token valid.
+    steps:
+      - Covered by users-api token_revoked_after_admin_* and
+        token_valid_after_admin_edit_legal_name
+      - Mint subject token → admin PATCH/DELETE/resetPassword → GET /auth/users/self
+        with the pre-change token
+      - Expect 401/403 (404 also accepted after delete). Legal name expects 200.
+    result: fail
+    notes: >
+      2026-08-20: RQA-5952 lock-account case still allows the pre-issued token.
+      These users-api steps encode the full Gherkin matrix so a product fix can
+      be verified without a two-machine App session. Probe is GET /auth/users/self
+      only (identity-scoped).
+
   - id: U5
     name: Password reset one-use
     why: QA checklist §7 temp password works once; original password rejected.
@@ -87,7 +135,8 @@ tests:
 
 notes: >
   ODD/Desktop login modal, locked overlay, and first-login UX are App/ODD, not this
-  harness. Deactivate is PATCH locked=false only (API cannot lock=true); lock comes
-  from failed logins (S1). Logout/revoke has no auth-server route in the catalog;
-  session end is idleLogout (settings-suite S6) plus App/ODD token drop.
+  harness. Admin lock is PATCH locked=true; if that is rejected, file against
+  auth-server. Logout/revoke has no dedicated auth-server route in the catalog;
+  session end is idleLogout (settings-suite S6) plus token invalidation on
+  admin lock/delete/reset/role/username (RQA-5952 / users-api U8).
   Implementation: capabilities/user_management_suite.py, flex-test crs users-api.

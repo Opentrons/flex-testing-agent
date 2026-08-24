@@ -30,6 +30,7 @@ from flex_testing_agent.serial_console.kernel_log import (
 from flex_testing_agent.serial_console.login import (
     CommandResult,
     ensure_logged_in,
+    probe_console_state,
     run_command,
     run_command_result,
     watch_console,
@@ -83,6 +84,7 @@ __all__ = [
     "list_serial_devices",
     "open_interactive_shell",
     "partition_console_text",
+    "probe_console_state",
     "probe_remote_access",
     "record_transcript",
     "resolve_serial_port",

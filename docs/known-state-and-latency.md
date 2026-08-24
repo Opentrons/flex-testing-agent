@@ -25,7 +25,7 @@ work. We need:
 | **1. Clear robot-server data** | `flex-test reset-data` | DISRUPTIVE | `POST /settings/reset` with `runsHistory` (protocols, runs, offsets, …). Do **not** clear `authorizedKeys` by default. |
 | **2. Deck config** | part of known-state setup | REVERSIBLE | PUT known cutouts (HS on D1, trash A3, slots). |
 | **3. LPC / offsets** | part of known-state setup | REVERSIBLE + motion if probe | Prefer applying known offsets via HTTP when full probe LPC is blocked; live LPC only with explicit motion gate. |
-| **4. Seed run history** | `flex-test seed-runs` | PHYSICAL_MOTION | Dry deck, tip detection / sensing off, real motion; see inventory below. |
+| **4. Seed run history** | `flex-test seed-runs` | PHYSICAL_MOTION | Dry deck, tip detection / sensing off, real motion; Kansas deck config (HS D1, trash A3) is applied before **each** seed so scenarios are independent of leftover deck config. See inventory below. |
 | **4b. LPC jog timing** | `flex-test lpc-jog-timing` | PHYSICAL_MOTION | Many random `moveRelative` jogs in a high-Z safe box on C2; latency only (no offset persist). |
 | **5. Suite probes** | `probe` / `crs-off-*` / `api-suite` / latency | varies | Always run-state preflight (`docs/crs-testing.md`). |
 

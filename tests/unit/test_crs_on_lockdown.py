@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import httpx
+import pytest
+import respx
+
 from flex_testing_agent.capabilities.crs_on_lockdown import (
     LockdownActor,
+    LockdownProbeResult,
+    LockdownSuiteResult,
     _evaluate_probe,
     _expectation_for_actor,
+    probe_plaintext_http_closed,
 )
 from flex_testing_agent.catalog.crs_on_lockdown import (
     endpoints_for_crs_on_lockdown,
@@ -21,6 +28,7 @@ from flex_testing_agent.catalog.endpoints import (
     HttpMethod,
 )
 from flex_testing_agent.clients.http_probe import HttpStatusProbe
+from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.models.risk import RiskLevel
 
 
@@ -188,3 +196,66 @@ def test_expectation_operator_skips_allowed_routes() -> None:
     health = _spec("get_health", path="/health", scopes=())
     assert _expectation_for_actor(health, LockdownActor.OPERATOR) is None
     assert _expectation_for_actor(health, LockdownActor.NONE) == "public_ok"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_plaintext_http_open_fails() -> None:
+    settings = Settings(
+        robot_host="192.168.0.21",
+        robot_use_https=True,
+        robot_http_port=31950,
+        robot_health_timeout_seconds=1.0,
+    )
+    respx.get("http://192.168.0.21:31950/health").mock(
+        return_value=httpx.Response(200, json={"name": "KansasFLEX"})
+    )
+    respx.post("http://192.168.0.21:31950/auth/oauth2/token").mock(
+        return_value=httpx.Response(400, json={"error": "invalid_grant"})
+    )
+    rows = await probe_plaintext_http_closed(settings)
+    assert len(rows) == 2
+    assert all(not row.ok for row in rows)
+    assert {row.endpoint for row in rows} == {
+        "plaintext_http_health",
+        "plaintext_http_oauth",
+    }
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_plaintext_http_closed_passes() -> None:
+    settings = Settings(
+        robot_host="192.168.0.21",
+        robot_use_https=True,
+        robot_http_port=31950,
+        robot_health_timeout_seconds=1.0,
+    )
+    respx.get("http://192.168.0.21:31950/health").mock(
+        side_effect=httpx.ConnectError("closed")
+    )
+    respx.post("http://192.168.0.21:31950/auth/oauth2/token").mock(
+        side_effect=httpx.ConnectError("closed")
+    )
+    rows = await probe_plaintext_http_closed(settings)
+    assert len(rows) == 2
+    assert all(row.ok for row in rows)
+    assert all(row.status_code is None for row in rows)
+
+
+def test_plaintext_http_is_hard_failure() -> None:
+    result = LockdownSuiteResult(
+        results=[
+            LockdownProbeResult(
+                endpoint="plaintext_http_health",
+                method="GET",
+                path="/health",
+                actor="plaintext_http",
+                expected="deny",
+                status_code=200,
+                ok=False,
+                detail="open",
+            )
+        ]
+    )
+    assert result.hard_failures() == result.results

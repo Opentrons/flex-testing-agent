@@ -45,13 +45,16 @@ without `Opentrons-User-Notes` ([RQA-5841](https://opentrons.atlassian.net/brows
 
 ### Restore paths when CRS is on
 
-1. **Remote-access carveout (QA, keeps CRS on):** FTDI serial remount + touch
-   `/etc/opentrons-allow-remote-access` + restart `opentrons-remote-access-allowed`
-   so SSH / Jupyter / devtools work again. Harness:
-   `ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access`.
-   Cleared on the next OS update. Details: [crs-testing.md](crs-testing.md).
-2. **Full CRS exit (turn CRS off, preferred lab path):** as root over SSH or
-   FTDI serial, run `opentrons_disable_crs` and enter password
+Order: product HTTPS for API, then lab SSH for shell, then FTDI serial.
+[interaction-layers.md](interaction-layers.md).
+
+1. **Remote-access carveout (QA, keeps CRS on):** first enable needs FTDI
+   serial (`ALLOW_MUTATIONS=true uv run flex-test serial allow-remote-access`).
+   After that, prefer `flex-test ssh`. Sentinel
+   `/etc/opentrons-allow-remote-access`. Cleared on the next OS update.
+   Details: [crs-testing.md](crs-testing.md).
+2. **Full CRS exit (turn CRS off, preferred lab path):** as root over **SSH**
+   (or FTDI if SSH is down), run `opentrons_disable_crs` and enter password
    `{robot_serial}-0000` (same as enter-CRS). Do not run this from a protocol
    subprocess. Details: [crs-testing.md](crs-testing.md#enter--exit-crs-operator-notes).
 3. **Full CRS exit (fallback):** EXEC-2176 / assisted wipe when

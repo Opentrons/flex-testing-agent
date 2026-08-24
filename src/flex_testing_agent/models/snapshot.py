@@ -22,6 +22,11 @@ class RobotSnapshot(BaseModel):
     update_health: UpdateHealthReport | None = None
     access_control: AccessControlStatus
     errors: list[str] = Field(default_factory=list)
+    plaintext_http_reachable: bool | None = None
+    ssh_tcp_reachable: bool | None = None
+    ssh_authenticated: bool | None = None
+    recommended_shell: str = "unknown"
+    transport_notes: list[str] = Field(default_factory=list)
 
     @property
     def installed_software_version(self) -> str | None:

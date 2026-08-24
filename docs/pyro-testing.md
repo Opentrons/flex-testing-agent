@@ -6,9 +6,11 @@ default.
 
 Published checklist form:
 [test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml](test-suggestions/10.0.0-alpha.0-pyro-subprocess.yaml)
-(`make pages`). Release-delta plan for the next external alpha:
+(`make pages`). Release-delta plans:
 [test-suggestions/10.0.0-alpha.1-release-delta.yaml](test-suggestions/10.0.0-alpha.1-release-delta.yaml)
-(fixes on `chore_release-10.0.0` since `v10.0.0-alpha.0`). Historical checklist
+(fixes on `chore_release-10.0.0` since `v10.0.0-alpha.0`),
+[test-suggestions/10.0.0-alpha.4-release-delta.yaml](test-suggestions/10.0.0-alpha.4-release-delta.yaml)
+(three PRs since `v10.0.0-alpha.3`, including RQA-5913 livedata). Historical checklist
 from the internal line:
 [test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml](test-suggestions/4.0.0-alpha.10-pyro-subprocess.yaml).
 Spec background:
@@ -35,7 +37,7 @@ there is no existing match.
 | Signal | Value |
 |--------|--------|
 | Channel | **external** (`v10.0.0-alpha.N` stack tags) |
-| Example robot OS | `10.0.0-alpha.1` / `v10.0.0-alpha.1` (prior: `10.0.0-alpha.0`) |
+| Example robot OS | `10.0.0-alpha.4` / `v10.0.0-alpha.4` (prior: `10.0.0-alpha.1`, `10.0.0-alpha.0`) |
 | Feature flags | `enableHardwareSubprocess=true`, `enableProtocolSubprocess=true` |
 | Flag file | `/data/feature_flags.json` |
 
@@ -126,14 +128,17 @@ or matching `ot3@` archaeology tag):
 
 ## SSH and on-robot checks
 
-KansasFLEX SSH (lab key, not committed):
+Prefer [interaction-layers.md](interaction-layers.md): product HTTP(S) first,
+then lab SSH, then FTDI serial.
 
 ```bash
-ssh -i ~/.ssh/robot_key -o IdentitiesOnly=yes root@$ROBOT_HOST
+uv run flex-test ssh status
+uv run flex-test ssh run "systemctl is-active opentrons-robot-server"
 ```
 
-When the network is down or you need boot/kernel output, use the FTDI serial
-console instead of Tabby (close Tabby first; port is exclusive):
+Identity defaults to `~/.ssh/robot_key` (`ROBOT_SSH_IDENTITY`). When the
+network is down or you need boot/kernel output, use the FTDI serial console
+instead of Tabby (close Tabby first; port is exclusive):
 
 ```bash
 uv run flex-test serial list

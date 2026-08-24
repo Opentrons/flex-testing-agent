@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -97,7 +99,7 @@ async def test_update_user(session: RobotHttpSession) -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 @respx.mock
-async def test_update_self(session: RobotHttpSession) -> None:
+async def test_update_self_password(session: RobotHttpSession) -> None:
     route = respx.patch(f"{_BASE}/auth/users/self").mock(
         return_value=httpx.Response(
             200,
@@ -111,6 +113,33 @@ async def test_update_self(session: RobotHttpSession) -> None:
     )
     assert profile.reset_password is False
     assert route.calls[0].request.headers["Authorization"] == "Bearer subject-tok"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
+async def test_update_self_full_name(session: RobotHttpSession) -> None:
+    route = respx.patch(f"{_BASE}/auth/users/self").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {**_USER, "fullName": "Self Renamed"}},
+        )
+    )
+    client = UsersClient(session)
+    profile = await client.update_self(
+        UpdateSelfRequest(fullName="Self Renamed"),
+        access_token="subject-tok",
+    )
+    assert profile.full_name == "Self Renamed"
+    body = json.loads(route.calls[0].request.content.decode())
+    assert body == {"data": {"fullName": "Self Renamed"}}
+    assert route.calls[0].request.headers["Authorization"] == "Bearer subject-tok"
+
+
+@pytest.mark.unit
+def test_update_user_request_can_lock() -> None:
+    payload = UpdateUserRequest(locked=True).to_json_api()
+    assert payload == {"locked": True}
 
 
 @pytest.mark.unit

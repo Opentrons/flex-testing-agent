@@ -30,6 +30,7 @@ from flex_testing_agent.catalog.crs_on_lockdown import (
 from flex_testing_agent.catalog.endpoints import EndpointSpec, HttpMethod
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.http_probe import HttpStatusProbe, probe_http_status
+from flex_testing_agent.clients.session import RobotHttpSession
 from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.models.access_control import AccessControlState
 from flex_testing_agent.models.risk import RiskLevel
@@ -100,6 +101,9 @@ class LockdownSuiteResult:
             if row.ok:
                 continue
             if row.body_has_data and row.status_code in LEAK_STATUSES:
+                out.append(row)
+                continue
+            if row.actor == "plaintext_http":
                 out.append(row)
                 continue
             if (
@@ -355,6 +359,86 @@ async def _probe_bad_oauth(settings: Settings) -> tuple[int | None, bool]:
     return probe.status_code, probe.status_code not in LEAK_STATUSES
 
 
+def _plaintext_http_row(
+    *,
+    endpoint: str,
+    method: str,
+    path: str,
+    status_code: int | None,
+) -> LockdownProbeResult:
+    """CRS-on plaintext :31950 must not serve the API (QA checklist §9)."""
+    closed = status_code is None
+    if closed:
+        detail = "plaintext HTTP did not respond (expected)"
+    else:
+        detail = (
+            f"plaintext HTTP still served status={status_code}; "
+            "expected no API on :31950 when CRS is on"
+        )
+    return LockdownProbeResult(
+        endpoint=endpoint,
+        method=method,
+        path=path,
+        actor="plaintext_http",
+        expected="deny",
+        status_code=status_code,
+        ok=closed,
+        detail=detail,
+    )
+
+
+async def probe_plaintext_http_closed(
+    settings: Settings,
+) -> list[LockdownProbeResult]:
+    """Fail if CRS-on robot still answers HTTP ``:31950``.
+
+    Connection/TLS-level failure is a pass. Any HTTP status means the
+    plaintext API is still open (including 401 on OAuth).
+    """
+    http_settings = settings.model_copy(update={"robot_use_https": False})
+    timeout = min(settings.robot_health_timeout_seconds, 3.0)
+    rows: list[LockdownProbeResult] = []
+    async with RobotHttpSession(
+        http_settings.robot_base_url,
+        timeout_seconds=timeout,
+    ) as session:
+        try:
+            await session.get_json("/health")
+            health_status: int | None = 200
+        except RobotApiError as exc:
+            health_status = exc.status_code
+        rows.append(
+            _plaintext_http_row(
+                endpoint="plaintext_http_health",
+                method="GET",
+                path="/health",
+                status_code=health_status,
+            )
+        )
+        try:
+            await session.post_form(
+                "/auth/oauth2/token",
+                form={
+                    "grant_type": "password",
+                    "client_id": "opentrons_app",
+                    "username": "flex_test_nonexistent_user",
+                    "password": "not-a-real-password",
+                },
+            )
+            oauth_status: int | None = 200
+        except RobotApiError as exc:
+            oauth_status = exc.status_code
+        rows.append(
+            _plaintext_http_row(
+                endpoint="plaintext_http_oauth",
+                method="POST",
+                path="/auth/oauth2/token",
+                status_code=oauth_status,
+            )
+        )
+    return rows
+
+
 async def run_crs_on_lockdown(
     settings: Settings,
     *,
@@ -381,6 +465,7 @@ async def run_crs_on_lockdown(
             )
 
     result = LockdownSuiteResult(label=label)
+    result.results.extend(await probe_plaintext_http_closed(settings))
     try:
         actor_tokens, token_skipped = await _resolve_actor_tokens(settings, actors)
         result.skipped.extend(token_skipped)
