@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from flex_testing_agent.capabilities.crs_auth import access_token_for_username
 from flex_testing_agent.capabilities.descriptor import CapabilityDescriptor
 from flex_testing_agent.clients.errors import RobotApiError
 from flex_testing_agent.clients.oauth import OAuthClient
@@ -22,6 +23,10 @@ from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
 from flex_testing_agent.robot_certs.bootstrap import TrustCaResult, trust_robot_ca
 from flex_testing_agent.robots.flex import FlexRobot, _effective_user_notes
+
+# App UI "auto-logout due to inactivity" is minutes; API ``idleLogout`` is seconds.
+HARNESS_IDLE_LOGOUT_MINUTES = 999.0
+HARNESS_IDLE_LOGOUT_SECONDS = HARNESS_IDLE_LOGOUT_MINUTES * 60.0
 
 TRUST_CA = CapabilityDescriptor(
     name="crs_trust_ca",
@@ -47,7 +52,8 @@ ENABLE_CRS = CapabilityDescriptor(
     name="crs_enable",
     description=(
         "Create bootstrap admin, PATCH accessControlEnabled=true (one-way), "
-        "and provision enabled fixture users."
+        "provision enabled fixture users, and set idleLogout to the harness "
+        "lab default (999 minutes)."
     ),
     risk_level=RiskLevel.DISRUPTIVE,
     evidence_produced=["crs_enable.json"],
@@ -106,6 +112,26 @@ class EnableCrsResult:
     bootstrap_created: bool
     crs_enabled: bool
     provision: ProvisionUsersResult
+    idle_logout_seconds: float
+
+
+async def apply_harness_idle_logout(
+    robot: FlexRobot,
+    *,
+    access_token: str,
+) -> float:
+    """Set ``idleLogout`` to the harness lab default so OAuth tokens stay valid."""
+    robot.session.set_access_token(access_token)
+    robot.session.set_user_notes(
+        _effective_user_notes(robot.settings, access_token=access_token)
+    )
+    current = await robot.auth_settings.get_settings()
+    if current.idle_logout == HARNESS_IDLE_LOGOUT_SECONDS:
+        return HARNESS_IDLE_LOGOUT_SECONDS
+    patched = await robot.auth_settings.patch_settings(
+        {"idleLogout": HARNESS_IDLE_LOGOUT_SECONDS}
+    )
+    return patched.idle_logout
 
 
 async def run_enable_crs(
@@ -144,6 +170,7 @@ async def run_enable_crs(
 
     users = UsersClient(robot.session)
     provision_result = ProvisionUsersResult(outcomes=[])
+    admin_token: str | None = None
 
     if not already_enabled:
         try:
@@ -172,13 +199,25 @@ async def run_enable_crs(
     elif not skip_provision:
         oauth = OAuthClient(robot.session)
         token = await oauth.get_token(bootstrap_username, bootstrap_password)
+        admin_token = token.access_token
         provision_result = await run_provision_users(
             robot,
             fixture_path=fixture_path,
             replace=False,
-            access_token=token.access_token,
+            access_token=admin_token,
             fixture_file=fixture_file,
         )
+
+    if admin_token is None:
+        oauth = OAuthClient(robot.session)
+        admin_token = (
+            await oauth.get_token(bootstrap_username, bootstrap_password)
+        ).access_token
+
+    idle_logout_seconds = await apply_harness_idle_logout(
+        robot,
+        access_token=admin_token,
+    )
 
     result = EnableCrsResult(
         access_control_state=AccessControlState.ENABLED,
@@ -186,6 +225,7 @@ async def run_enable_crs(
         bootstrap_created=bootstrap_created,
         crs_enabled=crs_enabled,
         provision=provision_result,
+        idle_logout_seconds=idle_logout_seconds,
     )
     robot.raw_evidence["crs_enable"] = {
         "bootstrap_username": bootstrap_username,
@@ -194,6 +234,7 @@ async def run_enable_crs(
         "already_enabled": already_enabled,
         "provision_ok": provision_result.ok_count,
         "provision_failed": provision_result.fail_count,
+        "idle_logout_seconds": idle_logout_seconds,
     }
     return result
 
@@ -205,12 +246,13 @@ def _resolve_admin_credentials(settings: Settings) -> tuple[str | None, str | No
 
 
 async def _admin_access_token(robot: FlexRobot) -> str | None:
-    username, password = _resolve_admin_credentials(robot.settings)
-    if not username or not password:
+    username, _password = _resolve_admin_credentials(robot.settings)
+    if not username:
         return None
-    oauth = OAuthClient(robot.session)
-    token = await oauth.get_token(username, password)
-    return token.access_token
+    try:
+        return await access_token_for_username(robot.settings, username)
+    except (RobotApiError, ValueError, RuntimeError):
+        return None
 
 
 async def _provision_one(

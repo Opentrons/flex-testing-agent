@@ -39,6 +39,13 @@ Do not invent parallel HTTP stacks, arbitrary shell, or ad-hoc robot URLs from a
 | Bug epic | [RQA-5831](https://opentrons.atlassian.net/browse/RQA-5831) |
 | FTDI serial console | `serial_console/` + `flex-test serial` (Tabby alternative; not HTTP) |
 
+## Fixture users (CRS-on retests)
+
+Inspect lab users before mutating auth settings. Use `run_fixture_preflight()`;
+repair only when locked or neither lab password works. Do not provision/replace
+fixture users from retest scripts by default. See `.cursor/rules/fixture-users.mdc`
+and `docs/crs-on-setup.md#fixture-user-hygiene`.
+
 ## Extension rules
 
 - Prefer new **client methods** over one-off httpx in capabilities/CLI

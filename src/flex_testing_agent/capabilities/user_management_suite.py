@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from flex_testing_agent.clients.oauth import OAuthClient
 from flex_testing_agent.clients.users import UsersClient
 from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.fixtures.user_management import (
+    DEFAULT_AUDITOR_ROTATED_PASSWORD,
     DEFAULT_EPHEMERAL_PASSWORD_ROTATED,
     EPHEMERAL_USERNAME_RENAMED,
     EPHEMERAL_USERNAME_SELF_TMP,
@@ -25,7 +27,12 @@ from flex_testing_agent.fixtures.user_management import (
     token_for_user,
     verify_user_missing,
 )
-from flex_testing_agent.models.auth_users import UpdateSelfRequest, UpdateUserRequest
+from flex_testing_agent.models.auth_users import (
+    AccountType,
+    TokenResponse,
+    UpdateSelfRequest,
+    UpdateUserRequest,
+)
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
 from flex_testing_agent.robots.flex import FlexRobot
@@ -688,16 +695,102 @@ async def _self_status(users: UsersClient, access_token: str) -> int:
     return 200
 
 
+async def _patch_self_status(
+    users: UsersClient,
+    access_token: str,
+    *,
+    full_name: str,
+) -> int:
+    try:
+        await users.update_self(
+            UpdateSelfRequest(fullName=full_name),
+            access_token=access_token,
+        )
+    except RobotApiError as exc:
+        return exc.status_code if exc.status_code is not None else 0
+    return 200
+
+
 def _assert_token_revoked(
-    status: int, *, action: str, accepted: tuple[int, ...]
-) -> str:
+    status: int, *, action: str, accepted: tuple[int, ...], route: str
+) -> None:
     if status in accepted:
-        return f"GET /auth/users/self HTTP {status} after admin {action}"
+        return
     accepted_text = "/".join(str(code) for code in accepted)
     raise AssertionError(
-        f"RQA-5952: after admin {action}, expected GET /auth/users/self "
+        f"RQA-5952: after admin {action}, expected {route} "
         f"{accepted_text} for the pre-issued token, got HTTP {status}"
     )
+
+
+async def _assert_cached_token_scenario(
+    users: UsersClient,
+    oauth: OAuthClient,
+    *,
+    admin_token: str,
+    password: str,
+    action: str,
+    expect_revoked: bool,
+    admin_mutation: Awaitable[None],
+    revoked_statuses: tuple[int, ...] = _TOKEN_REVOKED_STATUSES,
+) -> str:
+    """Mint once, cache the token, prove it works, then re-probe after admin action."""
+    token = await _mint_token_revocation_subject(
+        users, oauth, admin_token=admin_token, password=password
+    )
+    try:
+        pre_get = await _self_status(users, token)
+        if pre_get != 200:
+            raise AssertionError(
+                f"RQA-5952: cached token must GET /auth/users/self 200 before "
+                f"admin {action}, got HTTP {pre_get}"
+            )
+        await admin_mutation
+        post_get = await _self_status(users, token)
+        post_patch = await _patch_self_status(
+            users,
+            token,
+            full_name="Flex Harness UM Cached Token Probe",
+        )
+        if expect_revoked:
+            _assert_token_revoked(
+                post_get,
+                action=action,
+                accepted=revoked_statuses,
+                route="GET /auth/users/self",
+            )
+            _assert_token_revoked(
+                post_patch,
+                action=action,
+                accepted=revoked_statuses,
+                route="PATCH /auth/users/self",
+            )
+            intro_active: bool | None = None
+            with contextlib.suppress(RobotApiError):
+                intro = await oauth.introspect_token(token)
+                intro_active = intro.active
+            detail = (
+                f"cached token rejected GET {post_get} PATCH {post_patch} "
+                f"after admin {action}; introspect active={intro_active}"
+            )
+        else:
+            if post_get != 200:
+                raise AssertionError(
+                    f"after admin {action}, cached token must still "
+                    f"GET /auth/users/self 200, got HTTP {post_get}"
+                )
+            if post_patch != 200:
+                raise AssertionError(
+                    f"after admin {action}, cached token must still "
+                    f"PATCH /auth/users/self 200, got HTTP {post_patch}"
+                )
+            detail = (
+                f"cached token still GET/PATCH /auth/users/self 200 "
+                f"after admin {action}"
+            )
+        return detail
+    finally:
+        await _cleanup_token_revocation_users(users, admin_token=admin_token)
 
 
 async def _token_revoked_after_admin_edit_username(
@@ -707,21 +800,22 @@ async def _token_revoked_after_admin_edit_username(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         await users.update_user(
             EPHEMERAL_USERNAME_TOKEN_REV,
             UpdateUserRequest(username=EPHEMERAL_USERNAME_TOKEN_REV_REN),
             access_token=admin_token,
         )
-        status = await _self_status(users, token)
-        return _assert_token_revoked(
-            status, action="edit username", accepted=_TOKEN_REVOKED_STATUSES
-        )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="edit username",
+        expect_revoked=True,
+        admin_mutation=_mutate(),
+    )
 
 
 async def _token_revoked_after_admin_edit_role(
@@ -731,21 +825,22 @@ async def _token_revoked_after_admin_edit_role(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         await users.update_user(
             EPHEMERAL_USERNAME_TOKEN_REV,
             UpdateUserRequest(accountType="auditor"),
             access_token=admin_token,
         )
-        status = await _self_status(users, token)
-        return _assert_token_revoked(
-            status, action="edit role", accepted=_TOKEN_REVOKED_STATUSES
-        )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="edit role",
+        expect_revoked=True,
+        admin_mutation=_mutate(),
+    )
 
 
 async def _token_valid_after_admin_edit_legal_name(
@@ -755,24 +850,22 @@ async def _token_valid_after_admin_edit_legal_name(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         await users.update_user(
             EPHEMERAL_USERNAME_TOKEN_REV,
             UpdateUserRequest(fullName="Flex Harness UM Legal"),
             access_token=admin_token,
         )
-        status = await _self_status(users, token)
-        if status == 200:
-            return "GET /auth/users/self HTTP 200 after admin edit legal name"
-        raise AssertionError(
-            "after admin edit legal name, pre-issued token must still "
-            f"GET /auth/users/self 200, got HTTP {status}"
-        )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="edit legal name",
+        expect_revoked=False,
+        admin_mutation=_mutate(),
+    )
 
 
 async def _token_revoked_after_admin_delete_user(
@@ -782,19 +875,19 @@ async def _token_revoked_after_admin_delete_user(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         await users.delete_user(EPHEMERAL_USERNAME_TOKEN_REV, access_token=admin_token)
-        status = await _self_status(users, token)
-        return _assert_token_revoked(
-            status,
-            action="delete user",
-            accepted=_TOKEN_REVOKED_AFTER_DELETE_STATUSES,
-        )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="delete user",
+        expect_revoked=True,
+        admin_mutation=_mutate(),
+        revoked_statuses=_TOKEN_REVOKED_AFTER_DELETE_STATUSES,
+    )
 
 
 async def _token_revoked_after_admin_lock_account(
@@ -804,10 +897,7 @@ async def _token_revoked_after_admin_lock_account(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         locked = await users.update_user(
             EPHEMERAL_USERNAME_TOKEN_REV,
             UpdateUserRequest(locked=True),
@@ -815,12 +905,16 @@ async def _token_revoked_after_admin_lock_account(
         )
         if not locked.locked:
             raise AssertionError("expected locked=true after admin PATCH")
-        status = await _self_status(users, token)
-        return _assert_token_revoked(
-            status, action="lock account", accepted=_TOKEN_REVOKED_STATUSES
-        )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="lock account",
+        expect_revoked=True,
+        admin_mutation=_mutate(),
+    )
 
 
 async def _token_revoked_after_admin_reset_password(
@@ -830,19 +924,284 @@ async def _token_revoked_after_admin_reset_password(
     admin_token: str,
     password: str,
 ) -> str:
-    token = await _mint_token_revocation_subject(
-        users, oauth, admin_token=admin_token, password=password
-    )
-    try:
+    async def _mutate() -> None:
         await users.reset_password(
             EPHEMERAL_USERNAME_TOKEN_REV, access_token=admin_token
         )
-        status = await _self_status(users, token)
-        return _assert_token_revoked(
-            status, action="reset password", accepted=_TOKEN_REVOKED_STATUSES
+
+    return await _assert_cached_token_scenario(
+        users,
+        oauth,
+        admin_token=admin_token,
+        password=password,
+        action="reset password",
+        expect_revoked=True,
+        admin_mutation=_mutate(),
+    )
+
+
+class Rqa5952ScenarioResult(BaseModel):
+    """One RQA-5952 Gherkin row exercised with a cached pre-minted token."""
+
+    scenario_id: str
+    action: str
+    expect_revoked: bool
+    ok: bool
+    detail: str = ""
+
+
+async def run_rqa5952_token_matrix(
+    settings: Settings,
+    *,
+    admin_username: str = "flex_harness_admin",
+) -> list[Rqa5952ScenarioResult]:
+    """Run only the RQA-5952 cached-token invalidation matrix."""
+    ensure_mutation_allowed(
+        settings,
+        risk_level=USER_MANAGEMENT_SUITE.risk_level,
+        capability_name=USER_MANAGEMENT_SUITE.name,
+    )
+    password = resolve_ephemeral_password()
+    admin_token = await access_token_for_username(settings, admin_username)
+    scenarios: list[tuple[str, str, bool, Awaitable[str]]] = []
+
+    async with FlexRobot(settings, access_token=admin_token) as robot:
+        users = UsersClient(robot.session)
+        oauth = OAuthClient(robot.session)
+
+        async def _wrap(coro: Awaitable[str]) -> str:
+            return await coro
+
+        scenarios = [
+            (
+                "edit_username",
+                "edit username",
+                True,
+                _token_revoked_after_admin_edit_username(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+            (
+                "edit_role",
+                "edit role",
+                True,
+                _token_revoked_after_admin_edit_role(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+            (
+                "edit_legal_name",
+                "edit legal name",
+                False,
+                _token_valid_after_admin_edit_legal_name(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+            (
+                "delete_user",
+                "delete user",
+                True,
+                _token_revoked_after_admin_delete_user(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+            (
+                "lock_account",
+                "lock account",
+                True,
+                _token_revoked_after_admin_lock_account(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+            (
+                "reset_password",
+                "reset password",
+                True,
+                _token_revoked_after_admin_reset_password(
+                    users, oauth, admin_token=admin_token, password=password
+                ),
+            ),
+        ]
+
+        results: list[Rqa5952ScenarioResult] = []
+        for scenario_id, action, expect_revoked, coro in scenarios:
+            try:
+                detail = await _wrap(coro)
+                results.append(
+                    Rqa5952ScenarioResult(
+                        scenario_id=scenario_id,
+                        action=action,
+                        expect_revoked=expect_revoked,
+                        ok=True,
+                        detail=detail,
+                    )
+                )
+            except Exception as exc:
+                results.append(
+                    Rqa5952ScenarioResult(
+                        scenario_id=scenario_id,
+                        action=action,
+                        expect_revoked=expect_revoked,
+                        ok=False,
+                        detail=str(exc),
+                    )
+                )
+        robot.raw_evidence["rqa5952_token_matrix"] = [
+            item.model_dump(mode="json") for item in results
+        ]
+        return results
+
+
+class Rqa5950ProbeStep(BaseModel):
+    """One HTTP or introspection probe with the cached pre-rename token."""
+
+    step: str
+    http_status: int | None = None
+    introspect_active: bool | None = None
+    introspect_username: str | None = None
+    detail: str = ""
+
+
+class Rqa5950RetestResult(BaseModel):
+    """Outcome for RQA-5950 self-username change with cached session token."""
+
+    subject_username: str
+    temp_username: str
+    ok: bool
+    probes: list[Rqa5950ProbeStep] = Field(default_factory=list)
+    detail: str = ""
+
+
+async def run_rqa5950_retest(
+    settings: Settings,
+    *,
+    admin_username: str = "flex_harness_admin",
+    subject_username: str | None = None,
+    temp_username: str = EPHEMERAL_USERNAME_SELF_TMP,
+    full_name_after_rename: str = "Flex Harness RQA-5950 After Rename",
+) -> Rqa5950RetestResult:
+    """Retest RQA-5950: cached token must still use self routes after rename."""
+    ensure_mutation_allowed(
+        settings,
+        risk_level=USER_MANAGEMENT_SUITE.risk_level,
+        capability_name=USER_MANAGEMENT_SUITE.name,
+    )
+    spec = EphemeralUserSpec.default()
+    if subject_username is not None:
+        spec = EphemeralUserSpec(
+            username=subject_username,
+            password=resolve_ephemeral_password(),
+            full_name=spec.full_name,
+            account_type=spec.account_type,
         )
-    finally:
-        await _cleanup_token_revocation_users(users, admin_token=admin_token)
+    admin_token = await access_token_for_username(settings, admin_username)
+    probes: list[Rqa5950ProbeStep] = []
+
+    async def _probe_self(step: str, token: str) -> int:
+        status = await _self_status(users, token)
+        probes.append(Rqa5950ProbeStep(step=step, http_status=status))
+        return status
+
+    async def _probe_patch_full_name(step: str, token: str, full_name: str) -> int:
+        status = await _patch_self_status(users, token, full_name=full_name)
+        probes.append(Rqa5950ProbeStep(step=step, http_status=status, detail=full_name))
+        return status
+
+    async def _probe_introspect(step: str, token: str) -> None:
+        with contextlib.suppress(RobotApiError):
+            body = await oauth.introspect_token(token)
+            probes.append(
+                Rqa5950ProbeStep(
+                    step=step,
+                    introspect_active=body.active,
+                    introspect_username=body.username or body.sub,
+                )
+            )
+
+    async with FlexRobot(settings, access_token=admin_token) as robot:
+        users = UsersClient(robot.session)
+        oauth = OAuthClient(robot.session)
+        await ensure_user_absent(users, temp_username, admin_token=admin_token)
+        await ensure_user_present(users, spec, admin_token=admin_token)
+        cached_token = await token_for_user(oauth, spec.username, spec.password)
+
+        pre_get = await _probe_self("pre_rename_get_self", cached_token)
+        await _probe_introspect("pre_rename_introspect", cached_token)
+        if pre_get != 200:
+            result = Rqa5950RetestResult(
+                subject_username=spec.username,
+                temp_username=temp_username,
+                ok=False,
+                probes=probes,
+                detail=(
+                    "cached token must GET /auth/users/self 200 before rename, "
+                    f"got {pre_get}"
+                ),
+            )
+            robot.raw_evidence["rqa5950_retest"] = result.model_dump(mode="json")
+            return result
+
+        await users.update_self(
+            UpdateSelfRequest(username=temp_username),
+            access_token=cached_token,
+        )
+        probes.append(
+            Rqa5950ProbeStep(
+                step="patch_self_username",
+                http_status=200,
+                detail=temp_username,
+            )
+        )
+
+        failures: list[str] = []
+        try:
+            await _probe_introspect("post_rename_introspect_cached_token", cached_token)
+            post_get = await _probe_self(
+                "post_rename_get_self_cached_token",
+                cached_token,
+            )
+            if post_get != 200:
+                failures.append(f"GET /auth/users/self HTTP {post_get}")
+            post_patch = await _probe_patch_full_name(
+                "post_rename_patch_full_name_cached_token",
+                cached_token,
+                full_name_after_rename,
+            )
+            if post_patch != 200:
+                failures.append(f"PATCH /auth/users/self fullName HTTP {post_patch}")
+        finally:
+            reminted = await token_for_user(oauth, temp_username, spec.password)
+            restored = await users.update_self(
+                UpdateSelfRequest(
+                    username=spec.username,
+                    fullName=spec.full_name,
+                ),
+                access_token=reminted,
+            )
+            if restored.user_name != spec.username:
+                failures.append(
+                    f"cleanup restore username expected {spec.username!r}, "
+                    f"got {restored.user_name!r}"
+                )
+            await ensure_user_absent(users, temp_username, admin_token=admin_token)
+
+        ok = not failures
+        detail = (
+            "same-token GET+PATCH /auth/users/self after self username change ok "
+            f"(restored {spec.username})"
+            if ok
+            else "RQA-5950: pre-rename token must still use /auth/users/self after "
+            "username change; " + "; ".join(failures)
+        )
+        result = Rqa5950RetestResult(
+            subject_username=spec.username,
+            temp_username=temp_username,
+            ok=ok,
+            probes=probes,
+            detail=detail,
+        )
+        robot.raw_evidence["rqa5950_retest"] = result.model_dump(mode="json")
+        return result
 
 
 async def _patch_self_password(
@@ -882,3 +1241,508 @@ async def _verify_missing(
 ) -> str:
     await verify_user_missing(users, username, admin_token=admin_token)
     return "404 confirmed"
+
+
+class AccountOnboardingProbeStep(BaseModel):
+    """One step in the create → reset → rotate → re-login flow."""
+
+    step: str
+    http_status: int | None = None
+    ok: bool | None = None
+    account_type: str | None = None
+    reset_password: bool | None = None
+    detail: str = ""
+
+
+class AccountOnboardingRetestResult(BaseModel):
+    """Outcome for temp-password onboarding and post-rotation login."""
+
+    username: str
+    account_type: str
+    ok: bool
+    probes: list[AccountOnboardingProbeStep] = Field(default_factory=list)
+    detail: str = ""
+    post_rotation_get_self_status: int | None = None
+
+
+class AccountTypeOnboardingComparisonResult(BaseModel):
+    """Compare onboarding flows across CRS account types."""
+
+    results: list[AccountOnboardingRetestResult] = Field(default_factory=list)
+    auditor_specific: bool = False
+    detail: str = ""
+
+
+# Backward-compatible aliases for auditor-focused callers.
+AuditorOnboardingProbeStep = AccountOnboardingProbeStep
+AuditorOnboardingRetestResult = AccountOnboardingRetestResult
+
+
+async def run_auditor_onboarding_retest(
+    settings: Settings,
+    *,
+    admin_username: str = "flex_harness_admin",
+    spec: EphemeralUserSpec | None = None,
+    rotated_password: str | None = None,
+) -> AccountOnboardingRetestResult:
+    """Auditor wrapper for :func:`run_account_onboarding_retest`."""
+    return await run_account_onboarding_retest(
+        settings,
+        admin_username=admin_username,
+        spec=spec or EphemeralUserSpec.auditor_default(),
+        rotated_password=rotated_password,
+    )
+
+
+async def run_account_type_onboarding_comparison(
+    settings: Settings,
+    *,
+    admin_username: str = "flex_harness_admin",
+    account_types: tuple[AccountType, ...] = ("auditor", "user"),
+) -> AccountTypeOnboardingComparisonResult:
+    """Run onboarding retest for each account type and flag auditor-only failures."""
+    results: list[AccountOnboardingRetestResult] = []
+    for account_type in account_types:
+        spec = EphemeralUserSpec.for_account_type(account_type)
+        rotated = resolve_ephemeral_password(
+            DEFAULT_AUDITOR_ROTATED_PASSWORD
+            if account_type == "auditor"
+            else DEFAULT_EPHEMERAL_PASSWORD_ROTATED,
+        )
+        results.append(
+            await run_account_onboarding_retest(
+                settings,
+                admin_username=admin_username,
+                spec=spec,
+                rotated_password=rotated,
+            )
+        )
+
+    by_type = {item.account_type: item for item in results}
+    auditor = by_type.get("auditor")
+    user = by_type.get("user")
+    auditor_self = auditor.post_rotation_get_self_status if auditor else None
+    user_self = user.post_rotation_get_self_status if user else None
+    auditor_specific = (
+        auditor_self == 403
+        and user_self == 200
+        and auditor is not None
+        and user is not None
+    )
+    if auditor_specific:
+        detail = (
+            "auditor-specific: GET /auth/users/self returns 403 after password "
+            "rotation for auditor but 200 for user"
+        )
+    elif auditor_self == 403 and user_self == 403:
+        detail = (
+            "not auditor-specific: both auditor and user GET self 403 after rotation"
+        )
+    elif auditor_self == 200 and user_self == 200:
+        detail = "both auditor and user GET self 200 after rotation"
+    else:
+        detail = "mixed onboarding results: " + ", ".join(
+            f"{item.account_type} get_self={item.post_rotation_get_self_status}"
+            for item in results
+        )
+    return AccountTypeOnboardingComparisonResult(
+        results=results,
+        auditor_specific=auditor_specific,
+        detail=detail,
+    )
+
+
+async def run_account_onboarding_retest(
+    settings: Settings,
+    *,
+    admin_username: str = "flex_harness_admin",
+    spec: EphemeralUserSpec | None = None,
+    rotated_password: str | None = None,
+) -> AccountOnboardingRetestResult:
+    """Reproduce onboarding: admin reset, temp login, self rotation, re-login.
+
+    Mirrors manual CRS flow for any ``accountType``:
+    1. Admin creates the account
+    2. Admin ``POST .../resetPassword`` (user receives temporary password)
+    3. User logs in with temporary password (``resetPassword`` still true)
+    4. ``PATCH /auth/users/self`` to set a new password
+    5. Re-login with the new password and refresh-token rotation
+    """
+    ensure_mutation_allowed(
+        settings,
+        risk_level=USER_MANAGEMENT_SUITE.risk_level,
+        capability_name="account_onboarding_retest",
+    )
+    subject = spec or EphemeralUserSpec.auditor_default()
+    default_rotated = (
+        DEFAULT_AUDITOR_ROTATED_PASSWORD
+        if subject.account_type == "auditor"
+        else DEFAULT_EPHEMERAL_PASSWORD_ROTATED
+    )
+    new_password = rotated_password or resolve_ephemeral_password(default_rotated)
+    admin_token = await access_token_for_username(settings, admin_username)
+    probes: list[AccountOnboardingProbeStep] = []
+    failures: list[str] = []
+    post_rotation_get_self_status: int | None = None
+    expected_account_type = subject.account_type
+
+    async def _probe_ropc(
+        step: str,
+        username: str,
+        password: str,
+        *,
+        expect_ok: bool,
+    ) -> TokenResponse | None:
+        try:
+            token_response = await oauth.get_token(username, password)
+        except RobotApiError as exc:
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step=step,
+                    http_status=exc.status_code,
+                    ok=False,
+                    detail=str(exc) or "ROPC rejected",
+                )
+            )
+            if expect_ok:
+                failures.append(f"{step}: expected ROPC 200, got {exc.status_code}")
+            return None
+        refresh_note = (
+            "refresh_token issued"
+            if token_response.refresh_token
+            else "refresh_token omitted"
+        )
+        probes.append(
+            AccountOnboardingProbeStep(
+                step=step,
+                http_status=200,
+                ok=True,
+                detail=f"access_token minted; {refresh_note}",
+            )
+        )
+        if not expect_ok:
+            failures.append(f"{step}: expected ROPC rejection, got 200")
+        return token_response
+
+    async def _probe_refresh(
+        step: str,
+        refresh_token: str,
+        *,
+        expect_ok: bool,
+    ) -> TokenResponse | None:
+        try:
+            token_response = await oauth.refresh_access_token(refresh_token)
+        except RobotApiError as exc:
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step=step,
+                    http_status=exc.status_code,
+                    ok=False,
+                    detail=str(exc) or "refresh rejected",
+                )
+            )
+            if expect_ok:
+                failures.append(
+                    f"{step}: expected refresh 200, got {exc.status_code}",
+                )
+            return None
+        probes.append(
+            AccountOnboardingProbeStep(
+                step=step,
+                http_status=200,
+                ok=True,
+                detail="access_token minted via refresh_token grant",
+            )
+        )
+        if not expect_ok:
+            failures.append(f"{step}: expected refresh rejection, got 200")
+        return token_response
+
+    async with FlexRobot(settings, access_token=admin_token) as robot:
+        users = UsersClient(robot.session)
+        oauth = OAuthClient(robot.session)
+
+        await ensure_user_absent(users, subject.username, admin_token=admin_token)
+        created = await users.create_user(
+            username=subject.username,
+            password=subject.password,
+            full_name=subject.full_name,
+            account_type=subject.account_type,
+            access_token=admin_token,
+        )
+        probes.append(
+            AccountOnboardingProbeStep(
+                step="create_user",
+                http_status=201,
+                ok=True,
+                account_type=created.account_type,
+                reset_password=created.reset_password,
+                detail=f"username={created.user_name}",
+            )
+        )
+        if created.account_type != expected_account_type:
+            failures.append(
+                f"create_user: expected accountType={expected_account_type!r}, "
+                f"got {created.account_type!r}",
+            )
+
+        reset = await users.reset_password(
+            subject.username,
+            access_token=admin_token,
+        )
+        probes.append(
+            AccountOnboardingProbeStep(
+                step="admin_reset_password",
+                http_status=200,
+                ok=True,
+                account_type=reset.account_type,
+                reset_password=reset.reset_password,
+                detail="temporaryPassword=<redacted>",
+            )
+        )
+        if not reset.reset_password:
+            failures.append("admin_reset_password: expected resetPassword=true")
+        if reset.account_type != expected_account_type:
+            failures.append(
+                "admin_reset_password: "
+                f"expected accountType={expected_account_type!r}, "
+                f"got {reset.account_type!r}",
+            )
+
+        temp_login = await _probe_ropc(
+            "login_temp_password",
+            subject.username,
+            reset.temporary_password,
+            expect_ok=True,
+        )
+        temp_token = temp_login.access_token if temp_login is not None else None
+        temp_refresh = temp_login.refresh_token if temp_login is not None else None
+        if temp_token is not None:
+            profile = await users.get_self(access_token=temp_token)
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step="get_self_with_temp_login",
+                    http_status=200,
+                    ok=True,
+                    account_type=profile.account_type,
+                    reset_password=profile.reset_password,
+                )
+            )
+            if not profile.reset_password:
+                failures.append(
+                    "get_self_with_temp_login: expected resetPassword=true "
+                    "before rotation",
+                )
+
+            updated = await users.update_self(
+                UpdateSelfRequest(password=new_password),
+                access_token=temp_token,
+            )
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step="patch_self_new_password",
+                    http_status=200,
+                    ok=True,
+                    account_type=updated.account_type,
+                    reset_password=updated.reset_password,
+                )
+            )
+            if updated.reset_password:
+                failures.append(
+                    "patch_self_new_password: expected resetPassword=false "
+                    "after rotation",
+                )
+
+        await _probe_ropc(
+            "login_original_password_rejected",
+            subject.username,
+            subject.password,
+            expect_ok=False,
+        )
+        await _probe_ropc(
+            "login_temp_password_rejected",
+            subject.username,
+            reset.temporary_password,
+            expect_ok=False,
+        )
+        if temp_refresh:
+            await _probe_refresh(
+                "refresh_temp_password_token_rejected",
+                temp_refresh,
+                expect_ok=False,
+            )
+        else:
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step="refresh_temp_password_token_rejected",
+                    ok=None,
+                    detail="skipped: temp login omitted refresh_token",
+                )
+            )
+
+        new_login = await _probe_ropc(
+            "login_new_password",
+            subject.username,
+            new_password,
+            expect_ok=True,
+        )
+        if new_login is not None:
+            try:
+                ropc_profile = await users.get_self(access_token=new_login.access_token)
+            except RobotApiError as exc:
+                post_rotation_get_self_status = exc.status_code
+                probes.append(
+                    AccountOnboardingProbeStep(
+                        step="get_self_with_new_password_ropc_token",
+                        http_status=exc.status_code,
+                        ok=False,
+                        detail=str(exc),
+                    )
+                )
+                failures.append(
+                    "get_self_with_new_password_ropc_token: "
+                    f"expected 200, got {exc.status_code}",
+                )
+            else:
+                post_rotation_get_self_status = 200
+                probes.append(
+                    AccountOnboardingProbeStep(
+                        step="get_self_with_new_password_ropc_token",
+                        http_status=200,
+                        ok=True,
+                        account_type=ropc_profile.account_type,
+                        reset_password=ropc_profile.reset_password,
+                    )
+                )
+
+        repeat_login = await _probe_ropc(
+            "login_new_password_repeat",
+            subject.username,
+            new_password,
+            expect_ok=True,
+        )
+        new_token = repeat_login.access_token if repeat_login is not None else None
+        if new_token is not None:
+            intro = await oauth.introspect_token(new_token)
+            probes.append(
+                AccountOnboardingProbeStep(
+                    step="introspect_new_password_token",
+                    ok=intro.active,
+                    detail=(
+                        f"active={intro.active} "
+                        f"username={intro.username or intro.sub} "
+                        f"scope={intro.scope!r}"
+                    ),
+                )
+            )
+            if not intro.active:
+                failures.append("introspect_new_password_token: expected active=true")
+
+        new_refresh = new_login.refresh_token if new_login is not None else None
+        if new_login is not None and not new_refresh:
+            failures.append(
+                "login_new_password: expected refresh_token in ROPC response "
+                "(App session rotation depends on it)",
+            )
+        if new_refresh:
+            refreshed = await _probe_refresh(
+                "refresh_new_password_token",
+                new_refresh,
+                expect_ok=True,
+            )
+            if refreshed is not None:
+                try:
+                    intro = await oauth.introspect_token(refreshed.access_token)
+                except RobotApiError as exc:
+                    probes.append(
+                        AccountOnboardingProbeStep(
+                            step="introspect_refreshed_access_token",
+                            http_status=exc.status_code,
+                            ok=False,
+                            detail=str(exc),
+                        )
+                    )
+                    failures.append(
+                        "introspect_refreshed_access_token: "
+                        f"expected 200, got {exc.status_code}",
+                    )
+                else:
+                    probes.append(
+                        AccountOnboardingProbeStep(
+                            step="introspect_refreshed_access_token",
+                            ok=intro.active,
+                            detail=(
+                                f"active={intro.active} "
+                                f"username={intro.username or intro.sub} "
+                                f"scope={intro.scope!r}"
+                            ),
+                        )
+                    )
+                    if not intro.active:
+                        failures.append(
+                            "introspect_refreshed_access_token: expected active=true",
+                        )
+                try:
+                    profile = await users.get_self(access_token=refreshed.access_token)
+                except RobotApiError as exc:
+                    probes.append(
+                        AccountOnboardingProbeStep(
+                            step="get_self_with_refreshed_token",
+                            http_status=exc.status_code,
+                            ok=False,
+                            detail=str(exc),
+                        )
+                    )
+                    failures.append(
+                        "get_self_with_refreshed_token: "
+                        f"expected 200, got {exc.status_code}",
+                    )
+                else:
+                    probes.append(
+                        AccountOnboardingProbeStep(
+                            step="get_self_with_refreshed_token",
+                            http_status=200,
+                            ok=True,
+                            account_type=profile.account_type,
+                            reset_password=profile.reset_password,
+                        )
+                    )
+                    if profile.account_type != expected_account_type:
+                        failures.append(
+                            "get_self_with_refreshed_token: "
+                            f"expected accountType={expected_account_type!r}",
+                        )
+                    if profile.reset_password:
+                        failures.append(
+                            "get_self_with_refreshed_token: "
+                            "expected resetPassword=false",
+                        )
+
+        await ensure_user_absent(users, subject.username, admin_token=admin_token)
+        probes.append(
+            AccountOnboardingProbeStep(
+                step="cleanup_delete_user",
+                http_status=200,
+                ok=True,
+            )
+        )
+
+        ok = not failures
+        detail = (
+            f"{subject.account_type} temp-password onboarding, post-rotation ROPC, "
+            "and refresh ok"
+            if ok
+            else f"{subject.account_type} onboarding bug: " + "; ".join(failures)
+        )
+        result = AccountOnboardingRetestResult(
+            username=subject.username,
+            account_type=subject.account_type,
+            ok=ok,
+            probes=probes,
+            detail=detail,
+            post_rotation_get_self_status=post_rotation_get_self_status,
+        )
+        robot.raw_evidence[f"onboarding_retest_{subject.account_type}"] = (
+            result.model_dump(mode="json")
+        )
+        return result

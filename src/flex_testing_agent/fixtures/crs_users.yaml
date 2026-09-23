@@ -2,11 +2,15 @@
 #
 # Lab defaults (KansasFLEX harness): bootstrap admin + shared fixture password
 # are hardcoded below. Override via .env when needed:
-#   CRS_FIXTURE_PASSWORD          — shared password for enabled fixture users
-#   CRS_PASSWORD_<ENV_SUFFIX>     — per-user override (see env_suffix)
-#   CRS_ADMIN_USERNAME / CRS_ADMIN_PASSWORD — override bootstrap admin
+#   CRS_FIXTURE_PASSWORD          — primary shared password for enabled fixture users
+#   CRS_FIXTURE_PASSWORD_ALT      — alternate shared password (password-reset toggle)
+#   CRS_PASSWORD_<ENV_SUFFIX>     — per-user primary override (see env_suffix)
+#   CRS_PASSWORD_<ENV_SUFFIX>_ALT — per-user alternate override
+#   CRS_ADMIN_USERNAME / CRS_ADMIN_PASSWORD / CRS_ADMIN_PASSWORD_ALT — bootstrap admin
 #
 # Enable CRS: ALLOW_MUTATIONS=true uv run flex-test crs enable --confirm-one-way
+#   (also sets idleLogout to 999 minutes so long harness runs are less likely to
+#   hit idle invalidation; harness uses ROPC only, not refresh-token rotation)
 # Provision:  ALLOW_MUTATIONS=true uv run flex-test crs provision-users
 
 version: 1
@@ -14,11 +18,14 @@ version: 1
 bootstrap_admin:
   username: flex_harness_admin
   password: "FlexHarnessAdmin1!"
+  password_alt: "FlexHarnessAdmin2!"
   full_name: Flex harness bootstrap admin
 
 defaults:
   password_env: CRS_FIXTURE_PASSWORD
+  password_alt_env: CRS_FIXTURE_PASSWORD_ALT
   lab_password: "FlexHarnessUsers1!"
+  lab_password_alt: "FlexHarnessUsers2!"
 
 users:
   - username: flex_test_admin
@@ -48,6 +55,17 @@ users:
     enabled: true
     env_suffix: FLEX_TEST_SERVICE
     notes: All scopes (service); use sparingly in matrix tests.
+
+  - username: flex_backup_admin
+    full_name: Flex backup administrator (recovery only)
+    account_type: admin
+    enabled: true
+    env_suffix: FLEX_BACKUP_ADMIN
+    password: "FlexBackupAdmin1!"
+    recovery_only: true
+    notes: >
+      Recovery fallback when test admins are locked or corrupted.
+      Not used in automated suites; override via CRS_PASSWORD_FLEX_BACKUP_ADMIN.
 
   # Legacy Postman names — not auto-created by product anymore; enable if you want them.
   - username: testadmin

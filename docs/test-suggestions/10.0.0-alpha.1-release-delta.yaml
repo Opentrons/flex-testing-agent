@@ -150,20 +150,21 @@ tests:
       alpha1-f2-disk-stress-crs-on.json.
 
   - id: F3
-    name: CRS analysis requires auth + reason (#22213 / EXEC-2877)
-    why: POST /protocols/{id}/analyses is now access-control gated when CRS is on.
+    name: CRS analysis bypasses auth + documentation (RQA-6012)
+    why: >
+      Analysis is simulation-only; it must not prompt login or documentation
+      when requireReasonForInteraction is true (product fix for RQA-6012).
     steps:
-      - "CRS on. Upload a protocol (labware-free comment-only protocol is fine for reanalysis UX)."
-      - "Unauthenticated POST /protocols/{id}/analyses → reject (401/403 class)."
-      - "Authenticated analysis without Opentrons-User-Notes when requireReasonForInteraction is true → expect documentation/reason enforcement per CRS settings."
-      - "Authenticated + reason → analysis created and completes."
-      - "App/ODD smoke: clone run / confirm RTP values / LPC setup should prompt login+documentation modal before reanalysis."
-    result: fail
+      - "CRS on with requireReasonForInteraction enabled."
+      - "Upload a protocol (authenticated; upload still needs CRS audit)."
+      - "Unauthenticated POST /protocols/{id}/analyses → 201 (not 401/403)."
+      - "Authenticated POST /analyses without Opentrons-User-Notes → 201 (not 451)."
+      - "App/ODD smoke: analyze / reanalyze / clone-run RTP confirm must not show documentation modal."
+    result: skipped
     notes: >
-      CRS enabled 2026-08-12. Unauthenticated POST /protocols/{id}/analyses → 401
-      (pass). Authenticated with/without Opentrons-User-Notes → 500
-      (AssertionError _coordinator is None). Bug: RQA-5849. App/ODD reanalysis
-      modal not exercised.
+      Harness: ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true
+      uv run python scripts/retest_rqa6012.py.
+      Prior alpha.1 expectation (auth + reason required) superseded by RQA-6012.
 
   - id: F4
     name: Module offsets visible after calibration (#22215 / RQA-5830)

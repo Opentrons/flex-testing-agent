@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    },
+    "playwright-electron": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@robertn702/playwright-mcp-electron@latest",
+        "--executable-path",
+        "/Applications/Opentrons.app/Contents/MacOS/Opentrons",
+        "--cwd",
+        "/Applications/Opentrons.app/Contents/Resources"
+      ],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": ""
+      }
+    }
+  }
+}

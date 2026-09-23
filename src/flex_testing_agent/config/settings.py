@@ -80,6 +80,10 @@ class Settings(BaseSettings):
         default=None,
         description="Bootstrap admin password for CRS-on user provisioning.",
     )
+    crs_admin_password_alt: str | None = Field(
+        default=None,
+        description=("Bootstrap admin alternate password for reset-password toggling."),
+    )
     robot_request_timeout_seconds: float = Field(default=30.0, gt=0)
     robot_health_timeout_seconds: float = Field(default=10.0, gt=0)
     database_url: str = Field(

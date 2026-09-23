@@ -52,3 +52,27 @@ async def test_oauth_introspect_token() -> None:
         body = await client.introspect_token("access-tok")
     assert body.active is True
     assert body.username == "flex_harness_um_crud"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
+async def test_oauth_refresh_access_token() -> None:
+    respx.post("http://127.0.0.1:31950/auth/oauth2/token").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "refreshed",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "scope": "run_signoff.write protocols.write",
+                "refresh_token": "new-refresh",
+            },
+        ),
+    )
+    async with RobotHttpSession("http://127.0.0.1:31950") as session:
+        client = OAuthClient(session)
+        token = await client.refresh_access_token("old-refresh")
+    assert token.access_token == "refreshed"
+    assert token.refresh_token == "new-refresh"
+    assert "run_signoff.write" in token.scope

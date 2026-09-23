@@ -1,4 +1,11 @@
-"""OAuth2 token client (ROPC) for CRS-on testing."""
+"""OAuth2 token client (ROPC) for CRS-on testing.
+
+The harness mints access tokens via resource-owner password credentials only.
+It does not perform refresh-token grants. Authenticated API calls do not extend
+access-token lifetime; the Opentrons App rotates sessions with refresh tokens.
+Long harness runs rely on a high ``idleLogout`` at CRS enable time and on
+re-authenticating via ROPC when a token expires.
+"""
 
 from __future__ import annotations
 
@@ -40,6 +47,25 @@ class OAuthClient:
         }
         if scope is not None:
             form["scope"] = scope
+        payload = await self._session.post_form(
+            "/auth/oauth2/token",
+            form=form,
+            timeout=timeout,
+        )
+        return TokenResponse.model_validate(payload)
+
+    async def refresh_access_token(
+        self,
+        refresh_token: str,
+        *,
+        timeout: float | None = None,
+    ) -> TokenResponse:
+        """Refresh-token grant (Opentrons App session rotation)."""
+        form: dict[str, str] = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": self._client_id,
+        }
         payload = await self._session.post_form(
             "/auth/oauth2/token",
             form=form,

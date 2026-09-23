@@ -75,6 +75,27 @@ CRS is why this split exists. The stack used to be a **single process** under
 `opentrons-robot-server`. Compliance mode needs protocol execution independent
 of HTTP, so the default OS line is three processes talking over **Pyro5**:
 
+### Pre-loaded protocol workers (expected)
+
+Robot-server keeps **at least two** `run_process_entry_point` workers warm after
+boot even when **no run is current**:
+
+| Pool role | Typical Pyro name prefix | Why |
+|-----------|-------------------------|-----|
+| Analysis / simulating | `ot-simulating-protocol_*` | Protocol analysis without cold-start |
+| Runs | `ot-protocol_*` | `POST /runs` without 20s+ Python import stall |
+
+This is **intentional**: separate process init is dominated by Python imports.
+QA harnesses must not treat `ps=2` with `run_count=0` as a leak ([RQA-6020](https://opentrons.atlassian.net/browse/RQA-6020) closed as expected behavior).
+
+NS registration may lag a few tens of seconds after boot; T+0 snapshots can
+show ps lines before names appear in the Pyro nameserver.
+
+**After uncurrent ([RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) closed):**
+pool size should settle back to **2** workers within ~30s. The runs-pool worker
+may keep a **new** `ot-protocol_*` pyroname (not the boot-time name); that is
+expected warm-pool reuse, not a leak. **Fail** only if `ps` count stays above 2.
+
 ```text
 opentrons-pyro-nameserver     (Pyro5 NS, localhost:9090)
         ↑ register / resolve
@@ -263,7 +284,7 @@ Kept for archaeology. Re-run on `v10.0.0-alpha.0` and update the new YAML.
 | C2 | **PASS** | upload + analysis `completed` / `result=ok` |
 | C3a | **PASS** | idle pause → 409; idle stop → 201/`stopped` |
 | C3b | **PASS** | live tip smoke play succeeded |
-| C6 | **FAIL** | [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) uncurrent clears NS name, processes remain |
+| C6 | **PASS** (alpha.5 retest) | Uncurrent settles to 2 pre-loaded workers; runs pool may keep new `ot-protocol_*` name ([RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) closed) |
 | D1–D4, D5a, D6–D8 | **PASS** / expected negative | see historical YAML |
 | D4b | **FAIL** | [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) |
 | D5b | **FAIL** (Closed) | [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) |
@@ -344,7 +365,7 @@ Many are assigned; several Closed. Keep linking when regressing on `10.0.0-alpha
 | [RQA-5788](https://opentrons.atlassian.net/browse/RQA-5788) | `unhashable type: 'dict'` on subsystem updates | Closed |
 | [RQA-5789](https://opentrons.atlassian.net/browse/RQA-5789) | After nameserver restart, app names never re-register | Closed on `v10.0.0-alpha.3` (oe-core#373 `PartOf=`) |
 | [RQA-5790](https://opentrons.atlassian.net/browse/RQA-5790) | robot-server does not reattach after hardware-api restart | Closed on `v10.0.0-alpha.3` (oe-core#373 `PartOf=`) |
-| [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) | Uncurrent clears NS `ot-protocol` but leaves processes | High; Casey |
+| [RQA-5791](https://opentrons.atlassian.net/browse/RQA-5791) | Uncurrent + warm pool reuse (closed; not a leak) | Closed |
 | [RQA-5796](https://opentrons.atlassian.net/browse/RQA-5796) | Succeeded runs return empty `/runs/{id}/commands` | Closed |
 | [RQA-5797](https://opentrons.atlassian.net/browse/RQA-5797) | Legacy StateSummary missing camera field | Josh |
 

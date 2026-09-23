@@ -102,30 +102,31 @@ tests:
     why: QA checklist — password expiry period respected (product-defined units).
     steps:
       - Document baseline passwordResetTime from GET /auth/settings (often null = disabled)
-      - If product allows lab-safe short expiry, PATCH to minimum allowed value
-      - Create or use user with known password; advance clock or wait until expiry window
-      - Login after expiry → expect forced reset flow (resetPassword flag, limited token scope)
-      - Restore passwordResetTime null
+      - PATCH 180 and 86399 → expect 422 (below 86400 second minimum)
+      - PATCH 86400 and 86401 → expect 200
+      - PATCH null → expect 200 (disable)
+      - Restore passwordResetTime baseline
+      - "Optional manual: wait until expiry or advance clock; login → forced reset flow"
     result: skipped
     notes: >
-      Often blocked in lab automation without clock control or documented minimum
-      expiry. Prefer manual ODD/App pass or staging with adjustable system time.
+      Harness S5 covers API boundary validation only. Full expiry behavior still
+      needs clock control or waiting 24h+.
 
   - id: S6
     name: idleLogout
-    why: QA checklist — auto logout after configured idle period; activity refreshes session.
+    why: QA checklist — auto logout after configured idle period without client refresh.
     steps:
       - Record baseline idleLogout (default often 180 seconds)
       - Admin PATCH /auth/settings {"data":{"idleLogout":60}} if product allows
-      - Login as flex_test_operator; save access_token
-      - Wait >60s with no authenticated API calls
-      - GET /auth/users/self or GET /instruments with stale token → expect 401 or introspect active=false
-      - Login again; perform authenticated GET within idle window → token still valid before timeout
+      - Login as flex_test_operator; save access_token (ROPC; harness does not use refresh_token)
+      - Wait >60s with no authenticated API calls on that access token
+      - POST /auth/oauth2/introspect or GET /auth/users/self with stale token → expect inactive / 401
+      - "Note: periodic authenticated API calls do not extend access-token lifetime; App refresh-token grants do"
       - Restore idleLogout baseline
     result: skipped
     notes: >
-      Confirm whether refresh-token or any API call resets idle timer (QA checklist
-      mentions activity refresh). Capture POST /auth/oauth2/introspect before/after wait.
+      Harness settings-suite S6 and ``flex-test crs idle-logout-inactivity`` cover
+      inactivity only. Session extension in the App is out of scope here.
 
   - id: S7
     name: requireAdminCredsWhenUpdatingRobotSoftware

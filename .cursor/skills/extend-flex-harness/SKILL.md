@@ -37,7 +37,9 @@ is missing, add it here first, then use it.
    - Store useful payloads on `robot.raw_evidence`
 6. **Expose via CLI** only as a thin Typer command in `cli/main.py` (`flex-test …`).
 7. **Tests**: unit tests with `respx` under `tests/unit/`; mark live tests `requires_robot`.
-8. **Quality**: run `make lint` and `make test`. Both must pass.
+8. **Live retests**: call `run_fixture_preflight()` first; do not reprovision or rotate
+   fixture passwords unless preflight repair is required (see `fixture-users.mdc`).
+9. **Quality**: run `make lint` and `make test`. Both must pass.
 
 ## Patterns to copy
 
@@ -51,6 +53,7 @@ is missing, add it here first, then use it.
 | CRS-on OAuth for CLI | `orchestration/crs_auth.py` (`optional_access_token`) |
 | CRS-on lockdown / matrix | `capabilities/crs_on_lockdown.py`, `capabilities/crs_on_matrix.py` |
 | CRS-on settings / users | `capabilities/crs_auth_settings_suite.py`, `capabilities/user_management_suite.py` |
+| Fixture user preflight | `capabilities/fixture_preflight.py` (`run_fixture_preflight`, `access_token_for_fixture_user`) |
 | Audit periods | `clients/audit.py` → `flex-test audit` |
 | Mutating install | `capabilities/install.py` + `orchestration/gates.py` |
 | LPC jog timing | `capabilities/lpc_jog_timing.py` + `fixtures/lpc_jog_space.py` |

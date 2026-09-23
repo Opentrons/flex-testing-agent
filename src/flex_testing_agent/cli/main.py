@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from flex_testing_agent.cli.app import app_app
 from flex_testing_agent.cli.audit import audit_app
 from flex_testing_agent.cli.crs import crs_app
 from flex_testing_agent.cli.logs import logs_app
@@ -42,6 +43,7 @@ app = typer.Typer(
     help="Local robot-testing harness for Opentrons Flex (Kansas).",
     no_args_is_help=True,
 )
+app.add_typer(app_app, name="app")
 app.add_typer(serial_app, name="serial")
 app.add_typer(ssh_app, name="ssh")
 app.add_typer(logs_app, name="logs")

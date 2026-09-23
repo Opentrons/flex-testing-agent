@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Post-reboot RQA-5791 audit: uncurrent should tear down protocol subprocesses.
+"""Post-reboot RQA-5791 audit: uncurrent should tear down run-specific subprocesses.
+
+Product keeps ~2 ``run_process_entry_point`` workers pre-loaded at boot (analysis +
+runs) so users avoid 20s+ cold-start import latency. Baseline is **not** ps=0.
 
 Repro aligned with Jira RQA-5791:
-1. Baseline ps + Pyro5 NS (after reboot, before create)
-2. POST /runs -> confirm ot-protocol_* in NS + run_process_entry_point in ps
+1. Stable baseline ps + Pyro5 NS (pre-loaded pool, no current run)
+2. POST /runs -> confirm run registers in NS + ps
 3. Stop idle run if needed, uncurrent
-4. ps + NS immediately and ~5s after uncurrent
-5. FAIL if run_process_entry_point remains without matching NS registration
+4. ps + NS at checkpoints after uncurrent
+5. FAIL if ps count stays above 2 after ~30s settle (pyroname reuse on runs pool is OK)
 """
 
 from __future__ import annotations
@@ -16,7 +19,6 @@ import asyncio
 import contextlib
 import json
 import re
-import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -24,7 +26,7 @@ from pathlib import Path
 
 from flex_testing_agent.capabilities.crs_auth import access_token_for_username
 from flex_testing_agent.clients.errors import RobotApiError
-from flex_testing_agent.config.settings import get_settings
+from flex_testing_agent.config.settings import Settings, get_settings
 from flex_testing_agent.fixtures.auth_settings_suite import default_smoke_protocol_path
 from flex_testing_agent.orchestration.discover import settings_with_resolved_host
 from flex_testing_agent.orchestration.run_state import (
@@ -32,6 +34,7 @@ from flex_testing_agent.orchestration.run_state import (
     ensure_run_state,
     release_current_run,
 )
+from flex_testing_agent.lab_ssh.probe import run_lab_ssh
 from flex_testing_agent.robots.flex import FlexRobot
 from flex_testing_agent.serial_console import resolve_serial_port
 
@@ -39,14 +42,20 @@ ADMIN = "flex_test_admin"
 SIGNED_BY = "Flex Harness RQA-5791 Retest"
 SMOKE = default_smoke_protocol_path()
 ROOT = Path(__file__).resolve().parents[1]
-ART = Path("artifacts/retest-rqa5791")
+ART = Path("artifacts/retest-rqa5791-checkpoints")
+DEFAULT_CHECKPOINTS_S = (0.0, 5.0, 30.0, 60.0, 120.0)
+EXTENDED_CHECKPOINTS_S = (0.0, 30.0, 60.0, 120.0, 180.0, 300.0, 600.0)
+# Product pre-loads analysis + runs workers (see docs/pyro-testing.md).
+PRELOADED_PS_EXPECTED = 2
+BASELINE_STABLE_DELAY_S = 60.0
+SETTLE_WINDOW_S = 30.0  # pool count should be stable by ~30s after uncurrent
 
-SERIAL_SNAPSHOT_CMD = (
+# Short one-liner; single-quoted -c avoids serial line-wrap truncation.
+SNAPSHOT_CMD = (
     "ps -ef | grep run_process_entry_point | grep -v grep || true; "
     "echo '---NS---'; "
-    "python3 -c \"import Pyro5.api as pyro; "
-    "ns=pyro.locate_ns(); "
-    "print('\\\\n'.join(sorted(ns.list()))\""
+    "python3 -c 'import Pyro5.api as pyro; "
+    'ns=pyro.locate_ns(); print("\\n".join(sorted(ns.list())))\''
 )
 
 
@@ -70,7 +79,11 @@ class ProcessSnapshot:
             if line.strip() == "---NS---":
                 section = "ns"
                 continue
-            if section == "ps" and "run_process_entry_point" in line:
+            if (
+                section == "ps"
+                and "run_process_entry_point" in line
+                and "--pyroname" in line
+            ):
                 ps_lines.append(line.strip())
             elif section == "ns" and line.strip() and not line.startswith(">"):
                 ns_names.append(line.strip())
@@ -94,11 +107,39 @@ class ProcessSnapshot:
 
     def summary(self) -> str:
         if not self.serial_ok:
-            return "serial unavailable"
+            return "shell unavailable"
         return (
             f"ps={len(self.ps_lines)} protocol_ns={len(self.protocol_ns)} "
             f"orphan_ps={len(self.orphan_ps_lines)}"
         )
+
+    def snapshot_dict(self) -> dict[str, object]:
+        return {
+            "summary": self.summary(),
+            "serial_ok": self.serial_ok,
+            "ps_lines": self.ps_lines,
+            "ns_names": self.ns_names,
+            "protocol_ns": self.protocol_ns,
+            "orphan_ps_lines": self.orphan_ps_lines,
+            "remaining_ps_count": len(self.ps_lines),
+        }
+
+
+def snapshot_to_dict(snap: ProcessSnapshot) -> dict[str, object]:
+    return snap.snapshot_dict()
+
+
+def pyronames_from_ps_lines(ps_lines: list[str]) -> set[str]:
+    names: set[str] = set()
+    for line in ps_lines:
+        match = re.search(r"--pyroname\s+(\S+)", line)
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def pyronames_from_snapshot(snap: ProcessSnapshot) -> set[str]:
+    return pyronames_from_ps_lines(snap.ps_lines)
 
 
 def _breakin_serial_shell(ser: object) -> None:
@@ -112,8 +153,15 @@ def _breakin_serial_shell(ser: object) -> None:
 
 
 def reboot_robot() -> None:
-    print("Rebooting KansasFLEX via FTDI serial…")
-    serial_run("reboot", label="reboot")
+    settings = get_settings()
+    print("Rebooting KansasFLEX via SSH…")
+    completed = run_lab_ssh(settings, "reboot", timeout=30.0)
+    if completed is None or completed.returncode not in {0, 255}:
+        err = (completed.stderr if completed else "") or (completed.stdout if completed else "")
+        print(f"SSH reboot failed ({err[:120]}); falling back to serial…")
+        serial_run("reboot", label="reboot")
+    print("Waiting 15s for reboot to take effect…")
+    time.sleep(15.0)
 
 
 async def wait_for_robot(*, timeout_s: float = 1200.0) -> str:
@@ -130,8 +178,22 @@ async def wait_for_robot(*, timeout_s: float = 1200.0) -> str:
         except Exception as exc:
             last_error = str(exc)
             print(f"  poll: {last_error[:120]}")
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(10.0)
     raise TimeoutError(f"Timed out waiting for robot health ({last_error})")
+
+
+def ssh_run(command: str, *, label: str, timeout: float = 60.0) -> str:
+    """Run a command on the robot via lab SSH."""
+    settings = get_settings()
+    completed = run_lab_ssh(settings, command, timeout=timeout)
+    if completed is None:
+        return "Could not obtain a Flex SSH session (ssh unavailable or timed out)"
+    raw = (completed.stdout or "") + (completed.stderr or "")
+    if completed.returncode != 0 and not raw.strip():
+        raw = f"ssh exit {completed.returncode}"
+    ART.mkdir(parents=True, exist_ok=True)
+    (ART / f"snapshot-{label}.txt").write_text(raw)
+    return raw.strip()
 
 
 def serial_run(command: str, *, label: str) -> str:
@@ -171,10 +233,12 @@ def serial_run(command: str, *, label: str) -> str:
     return body_match.group(1).strip() if body_match else raw
 
 
-def serial_snapshot(label: str) -> ProcessSnapshot:
-    raw = serial_run(SERIAL_SNAPSHOT_CMD.strip(), label=label)
+def process_snapshot(label: str) -> ProcessSnapshot:
+    """Capture ps + Pyro NS via SSH (preferred) or FTDI serial fallback."""
+    raw = ssh_run(SNAPSHOT_CMD.strip(), label=label)
+    if "Could not obtain a Flex SSH session" in raw:
+        raw = serial_run(SNAPSHOT_CMD.strip(), label=label)
     if "Could not obtain" in raw and label not in raw:
-        # Wrap body-only output for parser consistency.
         raw = f"{raw}\n---NS---\n" if "---NS---" not in raw else raw
     snap = ProcessSnapshot.from_serial(label, raw)
     if not snap.serial_ok and "Could not obtain" not in raw:
@@ -205,15 +269,118 @@ async def resolve_protocol_id(robot: FlexRobot) -> str:
     raise RuntimeError("could not resolve smoke protocol id")
 
 
-async def run_audit(*, post_uncurrent_delay_s: float) -> dict[str, object]:
+async def collect_run_state(robot: FlexRobot) -> dict[str, object]:
+    from flex_testing_agent.orchestration.run_state import snapshot_run_state
+
+    snap = await snapshot_run_state(robot)
+    return {
+        "summary": snap.describe(),
+        "has_current": snap.has_current,
+        "current_run_id": snap.current_run_id,
+        "current_status": snap.current_status,
+        "run_count": snap.run_count,
+    }
+
+
+async def investigate_post_reboot_baseline(
+    settings: Settings,
+) -> dict[str, object]:
+    """Capture pre-loaded pool baseline after reboot (not ps=0)."""
+    investigation: dict[str, object] = {
+        "post_health_snapshots": {},
+        "preloaded_ps_expected": PRELOADED_PS_EXPECTED,
+        "baseline_stable_delay_s": BASELINE_STABLE_DELAY_S,
+    }
+    admin_token = await access_token_for_username(settings, ADMIN)
+    async with FlexRobot(settings, access_token=admin_token) as admin:
+        investigation["run_state"] = await collect_run_state(admin)
+        runs_payload = await admin.session.get_json("/runs?pageLength=5")
+        data = runs_payload.get("data") if isinstance(runs_payload, dict) else None
+        investigation["recent_runs"] = data if isinstance(data, list) else []
+
+    for delay in (0.0, 30.0, BASELINE_STABLE_DELAY_S):
+        label = f"post-reboot-t{int(delay)}s"
+        if delay:
+            await asyncio.sleep(delay)
+        snap = process_snapshot(label)
+        snap_dict = snapshot_to_dict(snap)
+        snap_dict["pyronames"] = sorted(pyronames_from_snapshot(snap))
+        investigation["post_health_snapshots"][label] = snap_dict
+
+    journal = ssh_run(
+        "journalctl -u opentrons-robot-server -b --no-pager -n 40 2>&1 | "
+        "grep -Ei 'run_process|protocol|subprocess|current|startup' || true",
+        label="post-reboot-journal",
+        timeout=30.0,
+    )
+    investigation["robot_server_journal_excerpt"] = journal[:4000]
+
+    stable = investigation["post_health_snapshots"].get(
+        f"post-reboot-t{int(BASELINE_STABLE_DELAY_S)}s"
+    )
+    t0 = investigation["post_health_snapshots"].get("post-reboot-t0s")
+    assert isinstance(stable, dict)
+    stable_ps = int(stable.get("remaining_ps_count", 0))
+    stable_pyronames = set(stable.get("pyronames", []))
+    investigation["stable_pyronames"] = sorted(stable_pyronames)
+    investigation["stable_ps_count"] = stable_ps
+
+    run_state = investigation.get("run_state")
+    has_current = isinstance(run_state, dict) and bool(run_state.get("has_current"))
+    investigation["baseline_clean"] = (
+        not has_current and stable_ps >= PRELOADED_PS_EXPECTED
+    )
+    investigation["baseline_issue"] = None
+    if has_current:
+        investigation["baseline_issue"] = "current run persisted/restored at boot"
+    elif stable_ps < PRELOADED_PS_EXPECTED:
+        investigation["baseline_issue"] = (
+            f"expected >={PRELOADED_PS_EXPECTED} pre-loaded workers at T+"
+            f"{int(BASELINE_STABLE_DELAY_S)}s, saw {stable_ps}"
+        )
+    elif isinstance(t0, dict):
+        t0_orphans = len(t0.get("orphan_ps_lines", []))
+        investigation["baseline_note"] = (
+            f"T+0 may show {t0_orphans} orphan ps line(s) before NS registers "
+            "pre-loaded workers; stable baseline uses T+"
+            f"{int(BASELINE_STABLE_DELAY_S)}s."
+        )
+    else:
+        investigation["baseline_note"] = (
+            "Pre-loaded analysis + runs workers expected with no current run."
+        )
+    return investigation
+
+
+async def run_audit(*, checkpoint_delays_s: tuple[float, ...]) -> dict[str, object]:
     settings = await settings_with_resolved_host(get_settings())
     ART.mkdir(parents=True, exist_ok=True)
+
+    investigation = await investigate_post_reboot_baseline(settings)
+    (ART / "baseline-investigation.json").write_text(
+        json.dumps(investigation, indent=2),
+    )
+    print("Baseline investigation:", json.dumps(investigation, indent=2))
 
     snapshots: dict[str, ProcessSnapshot] = {}
     run_id: str | None = None
     create_elapsed_s: float | None = None
+    uncurrent_at: float | None = None
 
-    snapshots["baseline"] = serial_snapshot("baseline")
+    stable_label = f"post-reboot-t{int(BASELINE_STABLE_DELAY_S)}s"
+    baseline_stable = investigation["post_health_snapshots"].get(stable_label)
+    baseline_pyronames: set[str] = set()
+    if isinstance(baseline_stable, dict):
+        baseline_pyronames = set(baseline_stable.get("pyronames", []))
+        snapshots["baseline"] = ProcessSnapshot(
+            label="baseline",
+            raw="",
+            serial_ok=True,
+            ps_lines=list(baseline_stable.get("ps_lines", [])),
+            ns_names=list(baseline_stable.get("ns_names", [])),
+            protocol_ns=list(baseline_stable.get("protocol_ns", [])),
+            orphan_ps_lines=list(baseline_stable.get("orphan_ps_lines", [])),
+        )
 
     admin_token = await access_token_for_username(settings, ADMIN)
     async with FlexRobot(settings, access_token=admin_token) as admin:
@@ -234,7 +401,7 @@ async def run_audit(*, post_uncurrent_delay_s: float) -> dict[str, object]:
             raise RuntimeError(f"create_run missing id: {created!r}")
         run_id = str(data["id"])
 
-        snapshots["during_run"] = serial_snapshot("during-run")
+        snapshots["during_run"] = process_snapshot("during-run")
 
         status = (data.get("status") or "").lower()
         if status == "idle":
@@ -242,60 +409,97 @@ async def run_audit(*, post_uncurrent_delay_s: float) -> dict[str, object]:
                 await admin.runs.stop(run_id)
 
         await release_current_run(admin, run_id, signed_by=SIGNED_BY)
+        uncurrent_at = time.monotonic()
 
-    snapshots["after_uncurrent_immediate"] = serial_snapshot("after-uncurrent-immediate")
-    await asyncio.sleep(post_uncurrent_delay_s)
-    snapshots["after_uncurrent_delayed"] = serial_snapshot("after-uncurrent-delayed")
+    checkpoint_results: dict[str, dict[str, object]] = {}
+    ordered = sorted({max(0.0, d) for d in checkpoint_delays_s})
+    elapsed_prev = 0.0
+    for delay_s in ordered:
+        wait_s = max(0.0, delay_s - elapsed_prev)
+        if wait_s:
+            await asyncio.sleep(wait_s)
+        elapsed_prev = delay_s
+        label = f"after-uncurrent-t{int(delay_s)}s"
+        snap = process_snapshot(label)
+        snapshots[label] = snap
+        checkpoint_results[label] = {
+            "delay_s": delay_s,
+            "leaked_pyronames": sorted(
+                pyronames_from_snapshot(snap) - baseline_pyronames
+            ),
+            "ps_count_delta": len(snap.ps_lines) - len(baseline_pyronames),
+            **snapshot_to_dict(snap),
+        }
 
     serial_failed = not all(s.serial_ok for s in snapshots.values())
-    during = snapshots["during_run"]
-    immediate = snapshots["after_uncurrent_immediate"]
-    delayed = snapshots["after_uncurrent_delayed"]
+    during = snapshots.get("during_run")
 
-    # RQA-5791: after uncurrent, NS ot-protocol gone but ps processes remain.
-    orphan_immediate = immediate.orphan_ps_lines or (
-        immediate.ps_lines
-        if immediate.ps_lines and not immediate.protocol_ns
-        else []
-    )
-    orphan_delayed = delayed.orphan_ps_lines or (
-        delayed.ps_lines if delayed.ps_lines and not delayed.protocol_ns else []
+    leaked_by_checkpoint = {
+        k: list(v.get("leaked_pyronames", []))
+        for k, v in checkpoint_results.items()
+    }
+    ps_by_checkpoint = {
+        k: int(v.get("remaining_ps_count", 0)) for k, v in checkpoint_results.items()
+    }
+    final_key = max(checkpoint_results, key=lambda k: checkpoint_results[k]["delay_s"])
+    final = checkpoint_results[final_key]
+    final_ps = int(final.get("remaining_ps_count", 0))
+    post_settle_ps = [
+        int(v.get("remaining_ps_count", 0))
+        for v in checkpoint_results.values()
+        if float(v.get("delay_s", 0)) >= SETTLE_WINDOW_S
+    ]
+    max_post_settle_ps = max(post_settle_ps) if post_settle_ps else final_ps
+    settled_to_pool = (
+        final_ps == PRELOADED_PS_EXPECTED and max_post_settle_ps <= PRELOADED_PS_EXPECTED
     )
 
     if serial_failed:
         passed: bool | None = None
-        verdict = "INCONCLUSIVE (serial shell unavailable for ps/NS audit)"
-    elif orphan_immediate or orphan_delayed:
-        passed = False
+        verdict = "INCONCLUSIVE (SSH/serial unavailable for ps/NS audit)"
+    elif not baseline_pyronames:
+        passed = None
+        verdict = "INCONCLUSIVE (stable baseline pyronames missing)"
+    elif settled_to_pool:
+        passed = True
         verdict = (
-            f"FAIL: orphan run_process_entry_point after uncurrent "
-            f"(immediate orphan_ps={len(orphan_immediate)} "
-            f"delayed orphan_ps={len(orphan_delayed)})"
+            f"PASS: settled to {PRELOADED_PS_EXPECTED} pre-loaded workers after "
+            f"{final['delay_s']:.0f}s (final_ps={final_ps}; runs pool may use a "
+            f"new ot-protocol_* pyroname; timeline_ps={ps_by_checkpoint})"
         )
     else:
-        passed = True
-        verdict = "PASS: no orphan protocol subprocess after uncurrent"
+        passed = False
+        verdict = (
+            f"FAIL: ps count did not settle to {PRELOADED_PS_EXPECTED} pre-loaded "
+            f"workers (final_ps={final_ps}, max_post_{SETTLE_WINDOW_S:.0f}s="
+            f"{max_post_settle_ps}; timeline_ps={ps_by_checkpoint})"
+        )
 
     result: dict[str, object] = {
         "ticket": "RQA-5791",
         "robot_host": settings.robot_host,
         "run_id": run_id,
         "create_elapsed_s": create_elapsed_s,
-        "post_uncurrent_delay_s": post_uncurrent_delay_s,
+        "uncurrent_at_monotonic": uncurrent_at,
+        "checkpoint_delays_s": list(ordered),
+        "baseline_pyronames": sorted(baseline_pyronames),
+        "baseline_ps_count": len(baseline_pyronames),
+        "settled_to_pool": settled_to_pool,
+        "settle_window_s": SETTLE_WINDOW_S,
+        "ps_by_checkpoint": ps_by_checkpoint,
+        "pyroname_changes_vs_baseline": leaked_by_checkpoint,
+        "final_checkpoint": final_key,
+        "baseline_investigation": investigation,
         "passed": passed,
         "verdict": verdict,
-        "during_run_had_protocol_ns": len(during.protocol_ns) > 0 if during.serial_ok else None,
-        "during_run_ps_count": len(during.ps_lines) if during.serial_ok else None,
-        "snapshots": {
-            key: {
-                "summary": snap.summary(),
-                "serial_ok": snap.serial_ok,
-                "ps_lines": snap.ps_lines,
-                "protocol_ns": snap.protocol_ns,
-                "orphan_ps_lines": snap.orphan_ps_lines,
-            }
-            for key, snap in snapshots.items()
-        },
+        "during_run_had_protocol_ns": (
+            len(during.protocol_ns) > 0 if during and during.serial_ok else None
+        ),
+        "during_run_ps_count": (
+            len(during.ps_lines) if during and during.serial_ok else None
+        ),
+        "checkpoints": checkpoint_results,
+        "snapshots": {key: snapshot_to_dict(snap) for key, snap in snapshots.items()},
     }
     (ART / "summary.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))
@@ -305,16 +509,22 @@ async def run_audit(*, post_uncurrent_delay_s: float) -> dict[str, object]:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--post-uncurrent-delay",
-        type=float,
-        default=5.0,
-        help="Seconds to wait before delayed ps/NS snapshot (default 5).",
+        "--extended",
+        action="store_true",
+        help="Use extended settle timeline (0,30,60,120,180,300,600s after uncurrent).",
+    )
+    parser.add_argument(
+        "--checkpoints",
+        type=str,
+        default=",".join(str(int(x)) for x in DEFAULT_CHECKPOINTS_S),
+        help="Comma-separated seconds after uncurrent for ps/NS snapshots "
+        "(default: 0,5,30,60,120).",
     )
     parser.add_argument(
         "--reboot",
         action="store_true",
         default=True,
-        help="Reboot robot via serial before audit (default: on).",
+        help="Reboot robot via SSH before audit (default: on).",
     )
     parser.add_argument(
         "--no-reboot",
@@ -334,11 +544,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
 
+    delays = tuple(
+        float(part.strip())
+        for part in (
+            ",".join(str(int(x)) for x in EXTENDED_CHECKPOINTS_S)
+            if args.extended
+            else args.checkpoints
+        ).split(",")
+        if part.strip()
+    )
+
     async def _run() -> dict[str, object]:
         if args.reboot:
             reboot_robot()
             await wait_for_robot(timeout_s=args.wait_timeout)
-        return await run_audit(post_uncurrent_delay_s=args.post_uncurrent_delay)
+        return await run_audit(checkpoint_delays_s=delays)
 
     result = asyncio.run(_run())
     passed = result.get("passed")

@@ -161,6 +161,13 @@ enforcement.
 and does **not** pause until the modal is submitted. Open the **door** to
 pause, or **E-Stop** in an emergency. Do not file this as an RQA bug.
 
+**Protocol analysis does not require documentation or login** ([RQA-6012](https://opentrons.atlassian.net/browse/RQA-6012)).
+Upload-time analysis and `POST /protocols/{protocolId}/analyses` (reanalysis)
+are simulation-only. They bypass CRS auth and documentation-required flows
+even when `requireReasonForInteraction` is true. App/ODD must not show the
+documentation modal for analyze/reanalyze. Verify with
+`uv run python scripts/retest_rqa6012.py` when CRS is on.
+
 Human-readable action text comes from `useCommandTextString` (every
 `RunTimeCommand` needs an explicit case, present gerund, no default). New
 commands without a case break the Documentation Required list. That is
@@ -201,6 +208,7 @@ settings-suite S9 must not assume one scope for every body.
 | Documentation Required on App/ODD POSTs | Out of scope for HTTP suites; send `Opentrons-User-Notes` anyway |
 | HTTP may omit reason and still succeed | Comment on [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841); do not file dupes |
 | HTTP 451 on a mutation | Likely missing documentation on a path that *does* enforce it; investigate |
+| Protocol analysis / reanalysis | No auth or documentation required ([RQA-6012](https://opentrons.atlassian.net/browse/RQA-6012)); `scripts/retest_rqa6012.py` |
 | Pause waits for a note | Expected; door or E-Stop. Do not file as a bug |
 | Cancel documentation modal | Must leave no error toast / no partial mutation |
 | Audit periods rotate on boot and protocol end | After `probe-c` / a signed-off run, `flex-test audit list` should show periods |
@@ -438,6 +446,21 @@ Public routes: `GET /health`, `GET /server/update/health`,
 `GET /auth/settings/accessControlEnabled`, `POST /auth/oauth2/token`,
 and all `/clientData` verbs (not under CRS; see product rules above).
 
+### OAuth sessions (harness vs App)
+
+- **Access tokens** from `POST /auth/oauth2/token` (`grant_type=password`) have a
+  fixed lifetime (`expires_in`). Authenticated API calls **do not** extend that
+  lifetime or reset idle logout.
+- **`idleLogout`** (seconds in API; minutes in App UI) invalidates a token after
+  the client stops using it for that period. Inactivity means no new access token
+  from a refresh flow, not “no HTTP requests.”
+- **Opentrons App** keeps users signed in by exchanging **refresh tokens** for
+  new access tokens. That behavior is App/ODD only; this harness does not
+  implement refresh-token grants.
+- **`flex-test crs enable`** PATCHes a high `idleLogout` (999 minutes) so long
+  API suites are less likely to hit idle invalidation mid-run. When a token
+  expires, capabilities re-authenticate via ROPC.
+
 | Command | What it proves |
 |---------|----------------|
 | `flex-test crs lockdown` | Negative auth (no/bad/under-scoped credentials); DISRUPTIVE+ excluded |
@@ -448,6 +471,7 @@ and all `/clientData` verbs (not under CRS; see product rules above).
 | `flex-test crs suite [--include-lockdown]` | Combined matrix + A+B+C (optional L1 lockdown) |
 | `flex-test crs users-api` | Auth-server CRUD, role change, non-admin 403, password reset |
 | `flex-test crs settings-suite` | QA checklist §8 tunables (S0–S12) |
+| `flex-test crs idle-logout-inactivity` | Token inactive after idle wait (no API traffic) |
 | `flex-test audit list\|download` | Audit log periods |
 
 Bootstrap: [crs-on-setup.md](crs-on-setup.md). Published plans:
@@ -472,7 +496,7 @@ stay on Sara's checklist.
 | §2 Robot Encryption Key / HTTPS CA | `flex-test crs trust-ca` | Partial (rotation UX is ODD) |
 | §3 Login success / fail | ROPC in OAuth client; `lockdown --actors bad_oauth`; [crs-user-management-onboarding.yaml](test-suggestions/crs-user-management-onboarding.yaml) U7 | API covered; modal is App/ODD |
 | §4 Logout / revoke token | No `/auth/oauth2/logout` in catalog | Gap (App/ODD + idleLogout S6) |
-| §5 Inactivity timeout | `crs settings-suite` S6 (`--include-slow`) | Covered (slow) |
+| §5 Inactivity timeout | `crs settings-suite` S6 (`--include-slow`); `crs idle-logout-inactivity` | Covered (slow / standalone) |
 | §6 User CRUD, role, rename, reset, delete | `flex-test crs users-api` | Covered |
 | §6 Non-admin 403 on user mutations | `users-api` operator_patch/delete_forbidden | Covered |
 | §6 Duplicate username | `users-api` post_duplicate_username_rejected | Covered |
@@ -492,6 +516,7 @@ stay on Sara's checklist.
 | PRD: requireAdminCreds for update / send protocol | `settings-suite` S7 / S8 / S10 | Covered |
 | Product: 21 CFR tooling, not Flex certification | Narrative in this doc | Documented; not a suite |
 | Product: Documentation Required on App/ODD mutations | `Opentrons-User-Notes` on CRS-on HTTP; 451 vs [RQA-5841](https://opentrons.atlassian.net/browse/RQA-5841) | Partial (UI out of scope) |
+| Product: Analysis bypasses auth + documentation | [RQA-6012](https://opentrons.atlassian.net/browse/RQA-6012); `scripts/retest_rqa6012.py` | Covered (HTTP) |
 | Product: Pause waits for a documentation note | Operator note; door / E-Stop | Expected; do not file as a bug |
 | Product: File Manager / no auto-delete | `flex-test audit` + `logs archive`; USB/ODD UI out of scope | Partial |
 | Product: subprocess isolation (`ot-protocol` user) | [pyro-testing.md](pyro-testing.md) | Covered (separate suite) |

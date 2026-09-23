@@ -26,7 +26,10 @@ from flex_testing_agent.fixtures.user_management import (
     ensure_user_absent,
     ensure_user_present,
 )
-from flex_testing_agent.models.auth_settings import AuthSettingsData
+from flex_testing_agent.models.auth_settings import (
+    PASSWORD_RESET_TIME_MIN_SECONDS,
+    AuthSettingsData,
+)
 from flex_testing_agent.models.auth_users import UpdateUserRequest
 from flex_testing_agent.models.risk import RiskLevel
 from flex_testing_agent.orchestration.gates import ensure_mutation_allowed
@@ -54,8 +57,8 @@ ALL_CASE_IDS = frozenset(
         "S12",
     }
 )
-SLOW_CASE_IDS = frozenset({"S5", "S6"})
-BLOCKED_BY_DEFAULT = frozenset({"S5"})
+SLOW_CASE_IDS = frozenset({"S6"})
+BLOCKED_BY_DEFAULT: frozenset[str] = frozenset()
 
 AUTH_SETTINGS_SUITE = CapabilityDescriptor(
     name="crs_auth_settings_suite",
@@ -261,10 +264,7 @@ async def run_auth_settings_suite(
             await record(
                 "S5",
                 "passwordResetTime",
-                _static_detail(
-                    "blocked: requires clock control or minimum expiry",
-                ),
-                skipped=not include_slow,
+                lambda: _case_s5(admin_robot, baseline=baseline),
             )
 
         if "S6" in selected:
@@ -608,6 +608,71 @@ async def _case_s4(
         await _apply_settings(robot, baseline)
 
 
+async def _case_s5(
+    robot: FlexRobot,
+    *,
+    baseline: AuthSettingsData,
+) -> str:
+    """Boundary checks for ``passwordResetTime`` (seconds; minimum 86400).
+
+    Does not wait for password expiry; full expiry behavior needs clock control.
+    """
+    minimum = PASSWORD_RESET_TIME_MIN_SECONDS
+    below_minimum_values = (180.0, float(minimum - 1))
+    try:
+        for value in below_minimum_values:
+            try:
+                await robot.auth_settings.patch_settings(
+                    {"passwordResetTime": value},
+                )
+            except RobotApiError as exc:
+                if exc.status_code != 422:
+                    msg = (
+                        f"expected 422 for passwordResetTime={value}, "
+                        f"got {exc.status_code}"
+                    )
+                    raise AssertionError(msg) from exc
+            else:
+                msg = f"expected 422 for passwordResetTime={value}"
+                raise AssertionError(msg)
+
+        at_minimum = await robot.auth_settings.patch_settings(
+            {"passwordResetTime": float(minimum)},
+        )
+        if at_minimum.password_reset_time != float(minimum):
+            raise AssertionError(
+                f"expected passwordResetTime={minimum}, "
+                f"got {at_minimum.password_reset_time!r}",
+            )
+
+        above_minimum = float(minimum + 1)
+        at_above = await robot.auth_settings.patch_settings(
+            {"passwordResetTime": above_minimum},
+        )
+        if at_above.password_reset_time != above_minimum:
+            raise AssertionError(
+                f"expected passwordResetTime={above_minimum}, "
+                f"got {at_above.password_reset_time!r}",
+            )
+
+        disabled = await robot.auth_settings.patch_settings(
+            {"passwordResetTime": None},
+        )
+        if disabled.password_reset_time is not None:
+            raise AssertionError(
+                "expected passwordResetTime=null after disable, "
+                f"got {disabled.password_reset_time!r}",
+            )
+
+        return (
+            f"180 and {minimum - 1}→422; "
+            f"{minimum} and {minimum + 1}→200; null→200 "
+            "(expiry wait not covered)"
+        )
+    finally:
+        await _apply_settings(robot, baseline)
+
+
 async def _case_s6(
     settings: Settings,
     *,
@@ -629,7 +694,8 @@ async def _case_s6(
                     f"token still active after {idle_wait_seconds}s idle "
                     "(expected idleLogout enforcement)"
                 )
-        return f"token inactive after {idle_wait_seconds}s idle"
+        return f"token inactive after {idle_wait_seconds}s idle (no API traffic; "
+        "access tokens are not refreshed by API activity)"
     finally:
         await _apply_settings(admin_robot, baseline)
 

@@ -12,7 +12,7 @@ from flex_testing_agent.capabilities.crs_on_tier_b import run_crs_on_tier_b
 from flex_testing_agent.config.settings import Settings
 
 
-def _mock_crs_on_auth() -> None:
+def _mock_crs_on_auth(*, self_username: str = "flex_test_operator") -> None:
     respx.get("http://127.0.0.1:31950/auth/settings/accessControlEnabled").mock(
         return_value=httpx.Response(200, json={"data": {"accessControlEnabled": True}})
     )
@@ -23,6 +23,21 @@ def _mock_crs_on_auth() -> None:
                 "access_token": "test-token",
                 "token_type": "Bearer",
                 "expires_in": 3600,
+            },
+        )
+    )
+    respx.get("http://127.0.0.1:31950/auth/users/self").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "username": self_username,
+                    "fullName": "Test User",
+                    "accountType": "user",
+                    "scopes": [],
+                    "locked": False,
+                    "resetPassword": False,
+                }
             },
         )
     )
@@ -79,7 +94,7 @@ async def test_crs_on_tier_b_uses_auth_username_fixture(tmp_path: Path) -> None:
         allow_mutations=False,
         artifact_directory=tmp_path / "artifacts",
     )
-    _mock_crs_on_auth()
+    _mock_crs_on_auth(self_username="flex_test_operator")
     respx.get("http://127.0.0.1:31950/protocols").mock(
         return_value=httpx.Response(200, json={"data": [{"id": "p1"}]})
     )
@@ -136,6 +151,21 @@ async def test_crs_on_tier_b_refuses_when_crs_off(tmp_path: Path) -> None:
                 "access_token": "test-token",
                 "token_type": "Bearer",
                 "expires_in": 3600,
+            },
+        )
+    )
+    respx.get("http://127.0.0.1:31950/auth/users/self").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "username": "flex_test_operator",
+                    "fullName": "Test User",
+                    "accountType": "user",
+                    "scopes": [],
+                    "locked": False,
+                    "resetPassword": False,
+                }
             },
         )
     )

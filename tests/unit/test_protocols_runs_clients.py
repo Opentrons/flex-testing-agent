@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -92,6 +93,27 @@ async def test_protocols_upload_multipart(
     )
     payload = await ProtocolsClient(session).upload_protocol(protocol)
     assert ProtocolsClient(session).protocol_id_from_upload(payload) == "uploaded-1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@respx.mock
+async def test_protocols_create_analysis_with_rtps(session: RobotHttpSession) -> None:
+    route = respx.post("http://127.0.0.1:31950/protocols/p1/analyses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": [{"id": "a2", "status": "pending"}]},
+        )
+    )
+    payload = await ProtocolsClient(session).create_analysis(
+        "p1",
+        run_time_parameter_values={"num_sample": 48, "dry_run": True},
+    )
+    assert payload["data"][0]["id"] == "a2"
+    request = route.calls.last.request
+    assert request.content is not None
+    body = json.loads(request.content)
+    assert body["data"]["runTimeParameterValues"]["num_sample"] == 48
 
 
 @pytest.mark.unit

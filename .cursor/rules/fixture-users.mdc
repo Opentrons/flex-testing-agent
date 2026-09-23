@@ -1,0 +1,52 @@
+---
+description: CRS fixture user hygiene for live retests and suites
+globs:
+  - scripts/retest_*.py
+  - scripts/**/*.py
+  - src/flex_testing_agent/capabilities/**/*.py
+---
+
+# Fixture user hygiene (CRS-on)
+
+KansasFLEX lab accounts (`flex_test_admin`, `flex_test_operator`, etc.) are shared
+with the Opentrons App. Retest scripts and live suites must **not** rotate,
+recreate, or reprovision them unless inspection proves the account is broken.
+
+## Required pattern
+
+1. **Inspect first** via `run_fixture_preflight()` (`capabilities/fixture_preflight.py`):
+   - Snapshot key `/auth/settings` flags
+   - For each fixture user: exists, locked, resetPassword, primary/alternate ROPC probe
+2. **Repair only when needed** (`repair=True`):
+   - Unlock if `locked=true`
+   - Clear `resetPassword` only when a working lab password is already known
+   - Admin `resetPassword` + restore lab primary **only when both passwords fail**
+3. **Never by default**:
+   - `flex-test crs provision-users --replace`
+   - `run_provision_users(..., replace=True)` in retest scripts
+   - Blind `unlock_fixture_users()` on every run
+   - `access_token_for_username(..., allow_admin_recovery=True)` in retest glue
+
+## Token minting in retest scripts
+
+After preflight succeeds, mint with:
+
+```python
+await access_token_for_fixture_user(settings, username, inspection=preflight.inspection_for(username))
+# or
+await ropc_token_for_fixture_user(...)
+```
+
+Use `access_token_for_username(..., allow_admin_recovery=False, repair_reset_password=False)`
+outside explicit preflight repair. Automatic password rotation on `resetPassword`
+breaks App sessions on other machines.
+
+## Missing users
+
+If a fixture user does not exist, **fail with a clear message** pointing to
+`flex-test crs provision-users` (create-if-missing). Do not auto-provision from
+retest scripts unless the operator passes an explicit `--prepare` flag.
+
+## Docs
+
+See `docs/crs-on-setup.md` section **Fixture user hygiene**.

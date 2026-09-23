@@ -6,6 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Auth-server rejects PATCH values below this (24 hours, measured in seconds).
+PASSWORD_RESET_TIME_MIN_SECONDS = 86400
+
 
 class AuthSettingsData(BaseModel):
     """Policy object inside ``GET /auth/settings`` ``data``."""

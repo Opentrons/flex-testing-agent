@@ -165,6 +165,26 @@ def _mock_user_management_routes() -> None:
         )
 
     def _patch_self(request: httpx.Request) -> httpx.Response:
+        auth = request.headers.get("authorization", "")
+        if auth == "Bearer rev-tok":
+            if "rev-tok" in revoked_tokens or not tok_rev["exists"]:
+                return httpx.Response(401, json={"errors": [{"title": "Unauthorized"}]})
+            data = _json_data(request)
+            full_name = data.get("fullName")
+            return httpx.Response(
+                200,
+                json={
+                    "data": _user(
+                        username=str(tok_rev["username"]),
+                        full_name=(
+                            str(full_name)
+                            if full_name is not None
+                            else str(tok_rev["full_name"])
+                        ),
+                        account_type=str(tok_rev["account_type"]),
+                    )
+                },
+            )
         data = _json_data(request)
         if data.get("password"):
             rotated["value"] = True
@@ -316,9 +336,16 @@ def _mock_user_management_routes() -> None:
     respx.patch(f"{_BASE}/auth/users/self").mock(side_effect=_patch_self)
     respx.post(f"{_BASE}/auth/oauth2/token").mock(side_effect=_oauth_token)
     respx.post(f"{_BASE}/auth/oauth2/introspect").mock(
-        return_value=httpx.Response(
+        side_effect=lambda request: httpx.Response(
             200,
-            json={"active": True, "username": EPHEMERAL_USERNAME_RENAMED},
+            json={
+                "active": "rev-tok" not in revoked_tokens,
+                "username": (
+                    str(tok_rev["username"])
+                    if request.content and b"rev-tok" in request.content
+                    else EPHEMERAL_USERNAME_RENAMED
+                ),
+            },
         )
     )
     respx.get(f"{_BASE}/auth/users/byUsername/{EPHEMERAL_USERNAME_RENAMED}").mock(

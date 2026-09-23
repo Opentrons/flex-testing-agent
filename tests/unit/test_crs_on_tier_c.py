@@ -14,7 +14,7 @@ from flex_testing_agent.config.settings import Settings
 from flex_testing_agent.orchestration.gates import MutationDeniedError
 
 
-def _mock_crs_on_auth() -> None:
+def _mock_crs_on_auth(*, self_username: str = "flex_test_service") -> None:
     respx.get("http://127.0.0.1:31950/auth/settings/accessControlEnabled").mock(
         return_value=httpx.Response(200, json={"data": {"accessControlEnabled": True}})
     )
@@ -25,6 +25,21 @@ def _mock_crs_on_auth() -> None:
                 "access_token": "test-token",
                 "token_type": "Bearer",
                 "expires_in": 3600,
+            },
+        )
+    )
+    respx.get("http://127.0.0.1:31950/auth/users/self").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": {
+                    "username": self_username,
+                    "fullName": "Test Service",
+                    "accountType": "service",
+                    "scopes": [],
+                    "locked": False,
+                    "resetPassword": False,
+                }
             },
         )
     )

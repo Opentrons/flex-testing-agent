@@ -44,7 +44,7 @@ def test_parse_case_ids() -> None:
 def test_resolve_selected_cases_defaults() -> None:
     selected = resolve_selected_cases(cases=None, include_slow=False)
     assert "S0" in selected
-    assert "S5" not in selected
+    assert "S5" in selected
     assert "S6" not in selected
     assert "S7" in selected
 
@@ -52,8 +52,8 @@ def test_resolve_selected_cases_defaults() -> None:
 @pytest.mark.unit
 def test_resolve_selected_cases_include_slow() -> None:
     selected = resolve_selected_cases(cases=None, include_slow=True)
+    assert "S5" in selected
     assert "S6" in selected
-    assert "S5" not in selected
 
 
 @pytest.mark.unit

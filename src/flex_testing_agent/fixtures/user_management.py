@@ -15,8 +15,12 @@ EPHEMERAL_USERNAME_RENAMED = "flex_um_crud_renamed"
 EPHEMERAL_USERNAME_SELF_TMP = "flex_um_self_tmp"
 EPHEMERAL_USERNAME_TOKEN_REV = "flex_um_tok_rev"
 EPHEMERAL_USERNAME_TOKEN_REV_REN = "flex_um_tok_ren"
+EPHEMERAL_USERNAME_AUDITOR = "flex_um_auditor"
+EPHEMERAL_USERNAME_USER_ONBOARD = "flex_um_user"
 DEFAULT_EPHEMERAL_PASSWORD = "FlexHarnessUm1!"
 DEFAULT_EPHEMERAL_PASSWORD_ROTATED = "FlexHarnessUm2!"
+DEFAULT_AUDITOR_INITIAL_PASSWORD = "FlexHarnessAud1!"
+DEFAULT_AUDITOR_ROTATED_PASSWORD = "FlexHarnessAud2!"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +40,30 @@ class EphemeralUserSpec:
             full_name="Flex Harness UM CRUD",
             account_type="user",
         )
+
+    @staticmethod
+    def auditor_default() -> EphemeralUserSpec:
+        return EphemeralUserSpec(
+            username=EPHEMERAL_USERNAME_AUDITOR,
+            password=resolve_ephemeral_password(DEFAULT_AUDITOR_INITIAL_PASSWORD),
+            full_name="Flex Harness UM Auditor",
+            account_type="auditor",
+        )
+
+    @staticmethod
+    def for_account_type(account_type: AccountType) -> EphemeralUserSpec:
+        """Throwaway onboarding user for the given CRS account type."""
+        if account_type == "auditor":
+            return EphemeralUserSpec.auditor_default()
+        if account_type == "user":
+            return EphemeralUserSpec(
+                username=EPHEMERAL_USERNAME_USER_ONBOARD,
+                password=resolve_ephemeral_password(DEFAULT_EPHEMERAL_PASSWORD),
+                full_name="Flex Harness UM User Onboard",
+                account_type="user",
+            )
+        msg = f"unsupported onboarding account type: {account_type!r}"
+        raise ValueError(msg)
 
 
 def resolve_ephemeral_password(default: str = DEFAULT_EPHEMERAL_PASSWORD) -> str:

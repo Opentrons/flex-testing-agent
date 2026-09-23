@@ -87,16 +87,28 @@ class ProtocolsClient:
         self,
         protocol_id: str,
         *,
+        run_time_parameter_values: dict[str, Any] | None = None,
+        force_re_analyze: bool | None = None,
         timeout: float = 120.0,
         expected_status: tuple[int, ...] | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """POST ``/protocols/{protocolId}/analyses`` (reanalysis)."""
+        """POST ``/protocols/{protocolId}/analyses`` (reanalysis).
+
+        Pass ``run_time_parameter_values`` to override RTPs and force a new
+        analysis when protocol bytes are unchanged. See robot-server
+        ``AnalysisRequest`` (``runTimeParameterValues``, ``forceReAnalyze``).
+        """
+        data: dict[str, Any] = {}
+        if run_time_parameter_values:
+            data["runTimeParameterValues"] = run_time_parameter_values
+        if force_re_analyze is not None:
+            data["forceReAnalyze"] = force_re_analyze
         return await self._session.post_json(
             f"/protocols/{protocol_id}/analyses",
-            json_body={"data": {}},
+            json_body={"data": data},
             timeout=timeout,
-            expected_status=expected_status or (201,),
+            expected_status=expected_status or (200, 201),
             extra_headers=extra_headers,
         )
 

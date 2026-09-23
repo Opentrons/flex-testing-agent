@@ -27,9 +27,8 @@ from flex_testing_agent.capabilities.crs_on_probe import probe_crs_on
 from flex_testing_agent.capabilities.crs_on_suite import run_crs_on_suite
 from flex_testing_agent.capabilities.crs_on_tier_b import run_crs_on_tier_b
 from flex_testing_agent.capabilities.crs_on_tier_c import run_crs_on_tier_c
-from flex_testing_agent.capabilities.idle_logout_activity import (
-    format_ping_table_rows,
-    run_idle_logout_activity,
+from flex_testing_agent.capabilities.idle_logout_inactivity import (
+    run_idle_logout_inactivity,
 )
 from flex_testing_agent.capabilities.user_management_suite import (
     run_user_management_suite,
@@ -668,6 +667,11 @@ def enable_crs_cmd(
                 "Fixture users",
                 f"ok={result.provision.ok_count} failed={result.provision.fail_count}",
             )
+        idle_minutes = result.idle_logout_seconds / 60
+        table.add_row(
+            "idleLogout",
+            f"{idle_minutes:.0f} min ({result.idle_logout_seconds:.0f}s)",
+        )
         console.print(table)
         if not skip_provision and result.provision.fail_count > 0:
             return 1
@@ -768,13 +772,13 @@ _SETTINGS_CASES_OPTION = typer.Option(
     "--cases",
     help=(
         "Comma-separated case ids (S0-S12). "
-        "Default: all except S5; S6 needs --include-slow."
+        "Default: all except S6; S6 needs --include-slow."
     ),
 )
 _SETTINGS_INCLUDE_SLOW_OPTION = typer.Option(
     False,
     "--include-slow",
-    help="Include S5 (passwordResetTime) and S6 (idleLogout wait).",
+    help="Include S6 (idleLogout wait). S5 runs boundary checks by default.",
 )
 _SETTINGS_RESTORE_OPTION = typer.Option(
     True,
@@ -860,63 +864,44 @@ def settings_suite_cmd(
     raise typer.Exit(asyncio.run(_run()))
 
 
-_IDLE_ACTIVITY_USER_OPTION = typer.Option(
+_IDLE_INACTIVITY_USER_OPTION = typer.Option(
     "flex_test_operator",
     "--username",
-    help="Fixture user to authenticate for the activity test.",
+    help="Fixture user to authenticate for the inactivity probe.",
 )
-_IDLE_ACTIVITY_INTERVAL_OPTION = typer.Option(
-    30.0,
-    "--activity-interval",
-    help="Seconds between authenticated API calls while holding one token.",
-)
-_IDLE_ACTIVITY_MARGIN_OPTION = typer.Option(
-    30.0,
+_IDLE_INACTIVITY_MARGIN_OPTION = typer.Option(
+    5.0,
     "--margin-seconds",
-    help="Extra seconds past idleLogout to remain active (default duration).",
+    help="Extra seconds past idleLogout to wait (default wait duration).",
 )
-_IDLE_ACTIVITY_DURATION_OPTION = typer.Option(
+_IDLE_INACTIVITY_WAIT_OPTION = typer.Option(
     None,
-    "--duration-seconds",
-    help="Override total active duration (default: idleLogout + margin).",
+    "--wait-seconds",
+    help="Override idle wait (default: idleLogout + margin from GET /auth/settings).",
 )
 
 
-@crs_app.command("idle-logout-activity")
-def idle_logout_activity_cmd(
-    username: str = _IDLE_ACTIVITY_USER_OPTION,
-    activity_interval: float = _IDLE_ACTIVITY_INTERVAL_OPTION,
-    margin_seconds: float = _IDLE_ACTIVITY_MARGIN_OPTION,
-    duration_seconds: float | None = _IDLE_ACTIVITY_DURATION_OPTION,
+@crs_app.command("idle-logout-inactivity")
+def idle_logout_inactivity_cmd(
+    username: str = _IDLE_INACTIVITY_USER_OPTION,
+    margin_seconds: float = _IDLE_INACTIVITY_MARGIN_OPTION,
+    wait_seconds: float | None = _IDLE_INACTIVITY_WAIT_OPTION,
 ) -> None:
-    """Keep one OAuth token active through idleLogout with periodic API calls."""
+    """Wait without API traffic and expect the access token to become inactive."""
 
     async def _run() -> int:
         settings = await _settings_for_robot()
-        try:
-            result = await run_idle_logout_activity(
-                settings,
-                username=username,
-                activity_interval_seconds=activity_interval,
-                margin_seconds=margin_seconds,
-                duration_seconds=duration_seconds,
-            )
-        except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            return 1
-
-        table = Table(title=f"idleLogout activity ({username})")
-        table.add_column("Elapsed")
-        table.add_column("Introspect active")
-        table.add_column("GET self OK")
-        table.add_column("Detail")
-        for row in format_ping_table_rows(result.pings):
-            table.add_row(*row)
-        console.print(table)
+        result = await run_idle_logout_inactivity(
+            settings,
+            username=username,
+            margin_seconds=margin_seconds,
+            wait_seconds=wait_seconds,
+        )
         console.print(
             f"idleLogout={result.idle_logout_seconds}s "
-            f"duration={result.duration_seconds}s "
-            f"interval={result.activity_interval_seconds}s"
+            f"wait={result.wait_seconds}s "
+            f"before_active={result.introspect_active_before} "
+            f"after_active={result.introspect_active_after}"
         )
         if result.ok:
             console.print(f"[green]{result.detail}[/green]")

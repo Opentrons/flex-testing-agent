@@ -79,3 +79,7 @@ class AuditClient:
     async def list_log_periods_raw(self) -> dict[str, Any]:
         """Return the raw JSON envelope for evidence capture."""
         return await self._session.get_json("/audit/external/logPeriods")
+
+    async def get_external_settings_raw(self) -> dict[str, Any]:
+        """GET ``/audit/external/settings`` envelope."""
+        return await self._session.get_json("/audit/external/settings")

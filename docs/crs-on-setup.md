@@ -107,16 +107,58 @@ Legacy Postman names (`testadmin`, `testuser`) remain in the fixture file as
 Provision after CRS on (bootstrap admin exists):
 
 ```bash
-# One-shot: enable CRS + bootstrap admin + fixture users
+# One-shot: enable CRS + bootstrap admin + fixture users + idleLogout=999 min
 ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs enable --confirm-one-way
 
 # Or provision only (CRS already on):
 export CRS_ADMIN_USERNAME='flex_harness_admin'   # optional; yaml default
 export CRS_ADMIN_PASSWORD='FlexHarnessAdmin1!'   # optional; yaml default
+export CRS_ADMIN_PASSWORD_ALT='FlexHarnessAdmin2!'   # optional; yaml default
 ALLOW_MUTATIONS=true uv run flex-test crs provision-users
 ```
 
 When CRS is still off, provisioning works without admin credentials (unauthenticated user create).
+
+### Fixture user hygiene
+
+Lab fixture users are **shared with the Opentrons App** on other machines. Retest
+scripts and agent sessions must not rotate passwords or recreate users on every run.
+
+**Default for live retests** (`scripts/retest_*.py`):
+
+1. Call `run_fixture_preflight()` from `capabilities/fixture_preflight.py`
+2. Print the auth-settings snapshot and per-user inspection table
+3. Repair **only** when inspection finds a broken account:
+   - `locked=true` → unlock
+   - `resetPassword=true` with a working lab password → clear via self rotation
+   - **both** primary and alternate ROPC fail → admin reset + restore lab primary
+4. Mint tokens with `access_token_for_fixture_user()` / `ropc_token_for_fixture_user()`
+   (no admin recovery, no silent password rotation)
+
+**Do not** on routine retests:
+
+- `flex-test crs provision-users --replace` (deletes and recreates users)
+- Blind unlock loops over all fixtures
+- `access_token_for_username(..., allow_admin_recovery=True)` without preflight
+
+**Create missing users** (one-time or after CRS enable):
+
+```bash
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs provision-users
+```
+
+Use `--replace` only when intentionally wiping fixture accounts (destructive).
+
+Primary/alternate lab passwords live in `.env` / `fixtures/crs_users.yaml` defaults
+(`CRS_FIXTURE_PASSWORD`, `CRS_FIXTURE_PASSWORD_ALT`). After a harness repair that
+rotates password, the App may need the other password from the pair until you align
+`.env` with the active credential.
+
+`flex-test crs enable` also PATCHes `idleLogout` to **999 minutes** (59940 seconds)
+so long harness runs are less likely to hit idle invalidation mid-suite. That does
+not implement refresh-token rotation; the harness uses ROPC access tokens only.
+The Opentrons App keeps sessions alive with OAuth refresh tokens. Re-run ROPC
+when a token expires. The step is idempotent when the robot is already at that value.
 
 ### 3. Auth session
 
@@ -240,6 +282,12 @@ ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs settings-suite
 ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run flex-test crs users-api
 uv run flex-test audit list
 uv run flex-test audit download <period-id>
+```
+
+RQA-6012 (analysis bypasses auth/documentation when CRS is on):
+
+```bash
+ALLOW_MUTATIONS=true ROBOT_USE_HTTPS=true uv run python scripts/retest_rqa6012.py
 ```
 
 Plans: [crs-auth-settings-behavior.yaml](test-suggestions/crs-auth-settings-behavior.yaml),

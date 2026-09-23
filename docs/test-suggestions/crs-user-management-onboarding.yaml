@@ -137,6 +137,8 @@ notes: >
   ODD/Desktop login modal, locked overlay, and first-login UX are App/ODD, not this
   harness. Admin lock is PATCH locked=true; if that is rejected, file against
   auth-server. Logout/revoke has no dedicated auth-server route in the catalog;
-  session end is idleLogout (settings-suite S6) plus token invalidation on
-  admin lock/delete/reset/role/username (RQA-5952 / users-api U8).
+  session end is idleLogout (settings-suite S6) when the client stops using the
+  access token and does not refresh it; the App extends sessions via refresh-token
+  grants. Admin lock/delete/reset/role/username also invalidate tokens (RQA-5952 /
+  users-api U8).
   Implementation: capabilities/user_management_suite.py, flex-test crs users-api.
